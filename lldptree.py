@@ -4,33 +4,11 @@
 # FreeBSD requirements:
 # Compile net-snmp with python bindings
 
-# Standard OIDs:
-# SNMPv2-MIB::sysDescr.0
-# SNMPv2-MIB::sysContact.0
-# SNMPv2-MIB::sysName.0
-# SNMPv2-MIB::sysLocation.0
-
-# IF-MIB::ifName.<port number>
-# IF-MIB::ifSpeed.<port number> (in bits/s)
-# IF-MIB::ifPhysAddress.<port number> MAC address
-
-# Juniper specific OIDs:
-# SNMPv2-SMI::enterprises.2636.3.1.2.0 Model short description
-# SNMPv2-SMI::enterprises.2636.3.1.3.0 Serial number
-
 # LLDP OIDs: (Juniper devices seem to lack 1.0.8802 OID)
 # .1.0.8802.1.1.2.1.4.1.1.7.0.<port number> Remote port
 # .1.0.8802.1.1.2.1.4.1.1.8.0.<port number> Remote port desc
 # .1.0.8802.1.1.2.1.4.1.1.9.0.<port number> Remote system name
 # .1.0.8802.1.1.2.1.4.1.1.10.0.<port number> Remote system desc
-# OIDs below not present in I.10.43 firmware:
-# .1.0.8802.1.1.2.1.5.4795.1.2.2.0 Hardware revision
-# .1.0.8802.1.1.2.1.5.4795.1.2.3.0 Boot ROM firmware version
-# .1.0.8802.1.1.2.1.5.4795.1.2.4.0 Current firmware version
-# .1.0.8802.1.1.2.1.5.4795.1.2.5.0 Serial number
-# .1.0.8802.1.1.2.1.5.4795.1.2.6.0 Manufacturer
-# .1.0.8802.1.1.2.1.5.4795.1.2.7.0 Model
-
 
 import netsnmp
 import sys
@@ -45,6 +23,33 @@ default_community="public"
 snmp_version=2
 # Uncomment to disable logging.
 #logging.disable(logging.INFO)
+
+standard_oid = dict(sysname='SNMPv2-MIB::sysName.0',
+		    sysdesc='SNMPv2-MIB::sysDescr.0',
+		    contact='SNMPv2-MIB::sysContact.0',
+		    location='SNMPv2-MIB::sysLocation.0')
+
+if_oid = dict(port_names='IF-MIB::ifName.',
+              port_speeds='IF-MIB::ifSpeed.',      # in bits/s
+              port_macs='IF-MIB::ifPhysAddress.')
+
+lldp_oid = dict(remote_sysnames='.1.0.8802.1.1.2.1.4.1.1.9.0.',
+		remote_sysdescs='.1.0.8802.1.1.2.1.4.1.1.10.0.',
+		remote_ports='.1.0.8802.1.1.2.1.4.1.1.7.0.',
+		remote_portdescs='.1.0.8802.1.1.2.1.4.1.1.8.0.')
+
+# Found among other on HP ProCurve devices, except I.10.* firmware
+procurve_oid = dict(rev='.1.0.8802.1.1.2.1.5.4795.1.2.2.0',
+		    bootfirmware='.1.0.8802.1.1.2.1.5.4795.1.2.3.0',
+		    firmware='.1.0.8802.1.1.2.1.5.4795.1.2.4.0',
+		    serial='.1.0.8802.1.1.2.1.5.4795.1.2.5.0',
+		    manufacturer='.1.0.8802.1.1.2.1.5.4795.1.2.6.0',
+		    model='.1.0.8802.1.1.2.1.5.4795.1.2.7.0')
+
+# Found among other on Juniper devices
+juniper_oid = dict(model='SNMPv2-SMI::enterprises.2636.3.1.2.0',
+		   serial='SNMPv2-SMI::enterprises.2636.3.1.3.0')
+
 oid = dict(remote_names='.1.0.8802.1.1.2.1.4.1.1.9.0',
 	   local_ports='IF-MIB::ifName',
 	   sysname='SNMPv2-MIB::sysName.0',
@@ -86,14 +91,14 @@ def snmpget(host, var):
 		logging.debug("snmpget(): %s Assuming OID %s", host, var)
 		var = netsnmp.Varbind(var)
 	result = netsnmp.snmpget(var, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
-	if result:
-		logging.debug("snmpget(): %s Got value %s", host, result)
+	if var.val:
+		logging.debug("snmpget(): %s Got value %s", host, var.val)
 		return var
 	else:
 		return None
 
 #
-# returns real local interface name (LLDP uses only numbers while the device might use letters).
+# returns real interface name (LLDP OIDs use only numbers while the device might use letters).
 #
 def get_port_name(host, port):
 	# Did we get an OID?
@@ -101,27 +106,49 @@ def get_port_name(host, port):
 		# Take the OID's second to last dot separated number. That's our interface.
 		logging.debug("get_port_name(): %s: From OID %s port is %s", host, port, port.split('.')[-2])
 		port = port.split('.')[-2]
-	# <local ports OID>.<port number> is what we're looking for
-	ref = netsnmp.Varbind(oid['local_ports'] + "." + port)
-	result = netsnmp.snmpget(ref, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
-	if result[0]:
+	# <port names OID><port number> is what we're looking for
+	ref = snmpget(host=host, var=if_oid['port_names'] + port)
+	if ref:
 		port = ref.val
 	logging.debug("get_port_name(): %s: Returning port name %s", host, port)
 	return port
+
+#
+# returns port speed
+#
+def get_port_speed(host, port, format='M'):
+	speed = None
+	divide = { 'G': 1000000000, 'M': 1000000, 'K': 1000, 'B': 1 }
+	if format.upper() not in divide:
+		format='M'
+
+	# Did we get an OID?
+        if '.' in port:
+                # Take the OID's second to last dot separated number. That's our interface.
+                logging.debug("get_port_speed(): %s: From OID %s port is %s", host, port, port.split('.')[-2])
+                port = port.split('.')[-2]
+        # <port speeds OID><port number> is what we're looking for
+        ref = snmpget(host=host, var=if_oid['port_speeds'] + port)
+        if ref:
+                speed_in_bits = ref.val
+		speed = speed_in_bits / divide[format.upper()]
+        logging.debug("get_port_name(): %s: Returning port name %s", host, port)
+        return speed
 
 #		
 # returns None if SNMP failed, or a dict with device info.
 #
 def get_device_info(host):
-	# Create minimal outline of the device object
-	r = dict(sysname=host, neighbours=dict())
+	# Let's start collecting info
+	r = dict(sysname=host)
 
 	# Get SNMP values for our set of OIDs.
 	for var in [ 'sysname', 'sysdesc', 'contact', 'location', 'firmware', 'serial', 'model' ]:
 		ref = snmpget(host=host, var=oid[var])
 
 		if not ref:
-			# Set SNMP failure flag if sysname failed. Not all devices have all OIDs we ask for
+			# Set SNMP failure flag if sysname failed. Not all devices have all OIDs we ask for,
+			# but sysname should be available.
 			if var is 'sysname':
 				r['snmp_unreachable'] = True
 			return r
@@ -137,7 +164,7 @@ def get_lldp_neighbours(host):
 	neighbours = dict()
 
         # Overly complicated declaration of what OID we will be checking.
-        lldp = netsnmp.VarList(netsnmp.Varbind(oid['remote_names']))
+        lldp = netsnmp.VarList(netsnmp.Varbind(lldp_oid['remote_sysnames']))
 
         #ret will be a list of values we got by walking the LLDP tree.
         # lldp VarList will be updated with values we got during the walk.
