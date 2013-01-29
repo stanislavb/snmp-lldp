@@ -38,27 +38,19 @@ lldp_oid = dict(remote_sysnames='.1.0.8802.1.1.2.1.4.1.1.9.0.',
 		remote_ports='.1.0.8802.1.1.2.1.4.1.1.7.0.',
 		remote_portdescs='.1.0.8802.1.1.2.1.4.1.1.8.0.')
 
+
+device_oid = dict()
 # Found among other on HP ProCurve devices, except I.10.* firmware
-procurve_oid = dict(rev='.1.0.8802.1.1.2.1.5.4795.1.2.2.0',
-		    bootfirmware='.1.0.8802.1.1.2.1.5.4795.1.2.3.0',
-		    firmware='.1.0.8802.1.1.2.1.5.4795.1.2.4.0',
-		    serial='.1.0.8802.1.1.2.1.5.4795.1.2.5.0',
-		    manufacturer='.1.0.8802.1.1.2.1.5.4795.1.2.6.0',
-		    model='.1.0.8802.1.1.2.1.5.4795.1.2.7.0')
+device_oid['procurve'] = dict(rev='.1.0.8802.1.1.2.1.5.4795.1.2.2.0',
+			      bootfirmware='.1.0.8802.1.1.2.1.5.4795.1.2.3.0',
+			      firmware='.1.0.8802.1.1.2.1.5.4795.1.2.4.0',
+			      serial='.1.0.8802.1.1.2.1.5.4795.1.2.5.0',
+			      manufacturer='.1.0.8802.1.1.2.1.5.4795.1.2.6.0',
+			      model='.1.0.8802.1.1.2.1.5.4795.1.2.7.0')
 
 # Found among other on Juniper devices
-juniper_oid = dict(model='SNMPv2-SMI::enterprises.2636.3.1.2.0',
-		   serial='SNMPv2-SMI::enterprises.2636.3.1.3.0')
-
-oid = dict(remote_names='.1.0.8802.1.1.2.1.4.1.1.9.0',
-	   local_ports='IF-MIB::ifName',
-	   sysname='SNMPv2-MIB::sysName.0',
-	   sysdesc='SNMPv2-MIB::sysDescr.0',
-	   contact='SNMPv2-MIB::sysContact.0',
-	   location='SNMPv2-MIB::sysLocation.0',
-	   firmware='.1.0.8802.1.1.2.1.5.4795.1.2.4.0',
-	   serial='.1.0.8802.1.1.2.1.5.4795.1.2.5.0',
-	   model='.1.0.8802.1.1.2.1.5.4795.1.2.7.0')
+device_oid['juniper'] = dict(model='SNMPv2-SMI::enterprises.2636.3.1.2.0',
+			     serial='SNMPv2-SMI::enterprises.2636.3.1.3.0')
 
 # Command line option parsing and help text (-h)
 usage="%(prog)s [options] HOST"
@@ -141,20 +133,26 @@ def get_port_speed(host, port, format='M'):
 def get_device_info(host):
 	# Let's start collecting info
 	r = dict(sysname=host)
+	device_family = None
 
-	# Get SNMP values for our set of OIDs.
-	for var in [ 'sysname', 'sysdesc', 'contact', 'location', 'firmware', 'serial', 'model' ]:
-		ref = snmpget(host=host, var=oid[var])
+	# First we poll standard OIDs
+	for key in standard_oid:
+		ref = snmpget(host=host,var=standard_oid[key])
+		if ref:
+			logging.debug("get_device_info(): %s: %s is %s", host, key, ref.val)
+			r[key] = ref.val
+			if key is 'sysdesc':
+				# Split into words (space separated), take the first one and lowercase it
+				device_family = ref.val.split(' ')[0].lower()
+				logging.debug("get_device_info(): Found device family %s", device_family)
 
-		if not ref:
-			# Set SNMP failure flag if sysname failed. Not all devices have all OIDs we ask for,
-			# but sysname should be available.
-			if var is 'sysname':
-				r['snmp_unreachable'] = True
-			return r
-		else:
-			logging.debug("get_device_info(): %s: %s is %s", host, var, ref.val)
-			r[var] = ref.val
+	# If we have a device family identified, let's look for a matching set of OIDs
+	if device_family in device_oid:
+		for key in device_oid[device_family]:
+			ref = snmpget(host=host, var=device_oid[device_family][key])
+			if ref:
+				logging.debug("get_device_info(): %s: %s is %s", host, key, ref.val)
+				r[key] = ref.val	
 	return r
 
 #
@@ -209,10 +207,6 @@ def branch(host):
 		checked.add(host)
 
 	c = get_device_info(host)
-	if 'snmp_unreachable' in c:
-		# SNMP failed. Bail out.
-		return c
-
 	c['neighbours'] = get_lldp_neighbours(host)
 	return c
 
