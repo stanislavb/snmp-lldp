@@ -4,12 +4,6 @@
 # FreeBSD requirements:
 # Compile net-snmp with python bindings
 
-# LLDP OIDs: (Juniper devices seem to lack 1.0.8802 OID)
-# .1.0.8802.1.1.2.1.4.1.1.7.0.<port number> Remote port
-# .1.0.8802.1.1.2.1.4.1.1.8.0.<port number> Remote port desc
-# .1.0.8802.1.1.2.1.4.1.1.9.0.<port number> Remote system name
-# .1.0.8802.1.1.2.1.4.1.1.10.0.<port number> Remote system desc
-
 import netsnmp
 import sys
 import logging
@@ -19,6 +13,7 @@ from socket import gethostbyname, gaierror
 
 # Config
 default_logfile='lldptree.log'
+default_outfile='lldptree.json'
 default_community="public"
 snmp_version=2
 # Uncomment to disable logging.
@@ -27,12 +22,14 @@ snmp_version=2
 standard_oid = dict(sysname='SNMPv2-MIB::sysName.0',
 		    sysdesc='SNMPv2-MIB::sysDescr.0',
 		    contact='SNMPv2-MIB::sysContact.0',
-		    location='SNMPv2-MIB::sysLocation.0')
+		    location='SNMPv2-MIB::sysLocation.0',
+		    uptime='SNMPv2-MIB::sysUpTime.0')
 
 if_oid = dict(port_names='IF-MIB::ifName.',
               port_speeds='IF-MIB::ifSpeed.',      # in bits/s
               port_macs='IF-MIB::ifPhysAddress.')
 
+# LLDP OIDs: (Juniper devices seem to lack 1.0.8802 OID)
 lldp_oid = dict(remote_sysnames='.1.0.8802.1.1.2.1.4.1.1.9.0.',
 		remote_sysdescs='.1.0.8802.1.1.2.1.4.1.1.10.0.',
 		remote_ports='.1.0.8802.1.1.2.1.4.1.1.7.0.',
@@ -57,20 +54,23 @@ usage="%(prog)s [options] HOST"
 parser = ArgumentParser(usage=usage)
 parser.add_argument("host", help="hostname or IP address", metavar="HOST")
 parser.add_argument("-c", "--community", default=default_community, help="SNMP community (default: %s)" % default_community)
-parser.add_argument("-m", "--map", action="store_true", help="Generate simple map of ID:s and child objects")
+parser.add_argument("-m", "--map", action="store_true", help="Generate recursive map of ID:s and child objects")
 parser.add_argument("-i", "--info", action="store_true", help="Populate objects with extra device information where available")
 parser.add_argument("-p", "--ports", action="store_true", help="Populate objects with port:device mappings")
 parser.add_argument("-l", "--logfile", default=default_logfile, help="Log file (default: %s)" % default_logfile)
+parser.add_argument("-o", "--outfile", default=default_outfile, help="JSON output file (default: %s)" % default_outfile)
 args = parser.parse_args()
 
-logging.basicConfig(filename=args.logfile,level=logging.DEBUG)
 # List of devices we've already checked.
-checked = set()
+checked = []
+logging.basicConfig(filename=args.logfile,level=logging.DEBUG)
+
 
 #
 # returns netsnmp.Varbind object if successful, returns None if not.
+# returns netsnmp.VarList if walk is set to True
 #
-def snmpget(host, var):
+def snmpget(host, var, walk=False):
 	# Make sure host is resolvable
 	try:
 		gethostbyname(host)
@@ -82,12 +82,19 @@ def snmpget(host, var):
 	if not isinstance(var, netsnmp.Varbind):
 		logging.debug("snmpget(): %s Assuming OID %s", host, var)
 		var = netsnmp.Varbind(var)
-	result = netsnmp.snmpget(var, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
-	if var.val:
-		logging.debug("snmpget(): %s Got value %s", host, var.val)
-		return var
+
+	if walk:
+		var = netsnmp.VarList(var)
+		result = netsnmp.snmpwalk(var, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
+		if result:
+			return var
 	else:
-		return None
+		result = netsnmp.snmpget(var, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
+		if var.val:
+			logging.debug("snmpget(): %s Got value %s", host, var.val)
+			return var
+	return None
+
 
 #
 # returns real interface name (LLDP OIDs use only numbers while the device might use letters).
@@ -122,7 +129,7 @@ def get_port_speed(host, port, format='M'):
         # <port speeds OID><port number> is what we're looking for
         ref = snmpget(host=host, var=if_oid['port_speeds'] + port)
         if ref:
-                speed_in_bits = ref.val
+                speed_in_bits = int(ref.val)
 		speed = speed_in_bits / divide[format.upper()]
         logging.debug("get_port_name(): %s: Returning port name %s", host, port)
         return speed
@@ -132,7 +139,7 @@ def get_port_speed(host, port, format='M'):
 #
 def get_device_info(host):
 	# Let's start collecting info
-	r = dict(sysname=host)
+	r = {}
 	device_family = None
 
 	# First we poll standard OIDs
@@ -155,64 +162,94 @@ def get_device_info(host):
 				r[key] = ref.val	
 	return r
 
-#
-# Collects LLDP neighbours from SMTP information, returns dict of port:neighbour pairs
-#
-def get_lldp_neighbours(host):
-	neighbours = dict()
 
-        # Overly complicated declaration of what OID we will be checking.
-        lldp = netsnmp.VarList(netsnmp.Varbind(lldp_oid['remote_sysnames']))
+#
+# Returns list of dicts with port name, speed and neighbour.
+#
+def get_neighbour_port_info(host, neighbours=None):
+	portlist = list()
+	if not isinstance(neighbours, dict):
+		# neighbours is not a dict. Let's get us something to work with.
+		neighbours = get_neighbours(host)
 
-        #ret will be a list of values we got by walking the LLDP tree.
+	for n in neighbours.keys():
+		# Take the OID's second to last dot separated number. That's our local interface.
+                port = get_port_name(host, n)
+		portspeed = get_port_speed(host, n)
+                logging.debug("get_neighbour_port_info(): %s port %s has neighbour %s, speed %s", host, port, neighbours[n], portspeed)
+		portlist.append({'name': port, 'speed': portspeed, 'neighbour': neighbours[n]})
+
+	return portlist
+
+
+#
+# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
+#
+def get_neighbours(host):
         # lldp VarList will be updated with values we got during the walk.
         # We rather want to use the Varbind objects since we can read
         # port number value from each OID.
-        ret = netsnmp.snmpwalk(lldp, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
-        logging.debug("get_lldp_neighbours(): %s neighbours are %s", host, ret)
-
-        for neighbour in lldp:
-                # Take the OID's second to last dot separated number. That's our local interface.
-                port = get_port_name(host, neighbour.tag)
-
-                #child = neighbour.val
-                # Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'.
-                child = neighbour.val.split('.')[0]
-
-                logging.debug("get_lldp_neighbours(): %s port %s has neighbour %s", host, port, child)
-                # Recursion! Yay!
-                n = branch(child)
-                if n:
-                        logging.debug("get_lldp_neighbours(): %s: Adding port %s: %s to tree", host, port, n['sysname'])
-                        neighbours[port] = n
-	return neighbours
+	lldp = snmpget(var=lldp_oid['remote_sysnames'], host=host, walk=True)
+	if not lldp:
+		return None
+	return { x.tag: x.val for x in lldp if x.val }
 
 
 #
 # returns None if SNMP failed, or a dict with device info and neighbours.
 #
 def branch(host):
+	# List of devices we've already checked.
 	global checked
+
+	c = {}
+
+	# Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'.
+	host = host.split('.')[0]
 
 	# Sometimes LLDP neighbour reports no name at all
 	if not host:
 		return None
 
-	# Have we already checked this device? Loop prevention.
-	if host in checked:
-		# Device is checked already. Let's not waste our time.
-		logging.debug("branch(): %s has already been checked", host)
-		return None
-	else:
-		checked.add(host)
+	if args.info:
+		c = get_device_info(host)
+	c['id'] = host
 
-	c = get_device_info(host)
-	c['neighbours'] = get_lldp_neighbours(host)
+	neighbours = get_neighbours(host)
+	if not neighbours:
+		return c
+
+	if args.map:
+		children = []
+		for x in neighbours.values():
+			# Have we already checked this device? Loop prevention.
+			if x and (x not in checked):
+				logging.debug("branch(): %s has neighbour %s", host, x)
+				checked.append(x)
+				# Recurse!
+				children.append(branch(x))
+		if children:
+			c['children'] = children
+	else:
+		c['children'] = neighbours.values()
+
+	if args.ports:
+		c['ports'] = get_neighbour_port_info(host, neighbours)
+
 	return c
 
 
-t = branch(args.host)
+#
+# Writes object to file in JSON format
+#
+def write_json_file(object, file=args.outfile):
+	with open(file, 'w') as outfile:
+		dump(object, outfile, sort_keys=False, indent=4, separators=(',', ': '))
+	
 
-# Write to file
-with open('lldptree.json', 'w') as outfile:
-	dump(t, outfile, sort_keys=False, indent=4, separators=(',', ': '))
+
+t = branch(args.host)
+if args.outfile is not None:
+	write_json_file(t)
+else:
+	dumps(t, sort_keys=False, indent=4, separators=(',', ': '))
