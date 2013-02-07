@@ -22,9 +22,23 @@ Usage
 -----
 Run the script with hostname of a SNMP and LLDP enabled device as argument. That device will become root of the generated tree.
 <pre>
-lldptree.py switch
+usage: lldptree.py [options] HOST
+
+positional arguments:
+  HOST                  hostname or IP address
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -c COMMUNITY, --community COMMUNITY
+                        SNMP community (default: public)
+  -m, --map             Generate recursive map of ID:s and child objects
+  -i, --info            Populate objects with extra device information where
+                        available
+  -p, --ports           Populate objects with port:device mappings
+  -l LOGFILE, --logfile LOGFILE
+                        Log file (default: lldptree.log)
+  -o OUTFILE, --outfile OUTFILE
+                        JSON output file (default: lldptree.json)
 </pre>
 
-As result we get a lot of SNMP error messages to STDERR when it fails to resolve LLDP neighbour names. That isn't very useful, is it? But look, there is also a log file with debug info and a json file generated with highly useful information.
-
-JSON object structure includes information gathered through SNMP: system name of the device, system description and for almost all HP ProCurve switches also model, firmware version, serial number and LLDP neighbours in a dict with local port as key (yay, recursion!).
+As result we get a log file with debug info and a json file generated with highly useful information. JSON object structure includes information gathered through SNMP: system name of the device, system description and for almost all HP ProCurve switches also model, firmware version, serial number and LLDP neighbours in a dict with local port as key (yay, recursion!).

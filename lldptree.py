@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python
 # Author: Stanislav Blokhin
 
 # FreeBSD requirements:
