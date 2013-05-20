@@ -12,8 +12,9 @@ Prerequisites
 
 Limitations
 -----------
-* **Currently this script only handles LLDP for HP ProCurve devices**
+* **Currently this script only handles LLDP for HP ProCurve and Juniper JUNOS devices**
 * HP ProCurve firmware I.10.43 and perhaps the whole I-series seems to lack OIDs for model, firmware version, serial number.
+* Juniper JUNOS older than version 11 seems to lack LLDP OIDs
 * Script can only reach devices which report a resolvable hostname over LLDP and have the same SNMP community configured.
 * SNMP version 1 and 2 only
 * If a device is connected to another with several ports, only the first port gets registered in the tree.

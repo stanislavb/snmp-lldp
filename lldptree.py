@@ -12,9 +12,11 @@ from argparse import ArgumentParser
 from socket import gethostbyname, gaierror
 
 # Config
+# Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'. The hostname argument at command line also has to be without domain.
+strip_domain_name = True
 default_logfile='lldptree.log'
 default_outfile='lldptree.json'
-default_community="public"
+default_community='public'
 snmp_version=2
 # Uncomment to disable logging.
 #logging.disable(logging.INFO)
@@ -29,11 +31,11 @@ if_oid = dict(port_names='IF-MIB::ifName.',
               port_speeds='IF-MIB::ifSpeed.',      # in bits/s
               port_macs='IF-MIB::ifPhysAddress.')
 
-# LLDP OIDs: (Juniper devices seem to lack 1.0.8802 OID)
-lldp_oid = dict(remote_sysnames='.1.0.8802.1.1.2.1.4.1.1.9.0.',
-		remote_sysdescs='.1.0.8802.1.1.2.1.4.1.1.10.0.',
-		remote_ports='.1.0.8802.1.1.2.1.4.1.1.7.0.',
-		remote_portdescs='.1.0.8802.1.1.2.1.4.1.1.8.0.')
+# LLDP OIDs: (Juniper devices with software older than JUNOS 11 lack 1.0.8802 OID)
+lldp_oid = dict(remote_sysnames='.1.0.8802.1.1.2.1.4.1.1.9.',
+		remote_sysdescs='.1.0.8802.1.1.2.1.4.1.1.10.',
+		remote_ports='.1.0.8802.1.1.2.1.4.1.1.7.',
+		remote_portdescs='.1.0.8802.1.1.2.1.4.1.1.8.')
 
 
 device_oid = dict()
@@ -96,21 +98,36 @@ def snmpget(host, var, walk=False):
 	return None
 
 
+# Shorthand for snmp walking using the snmpget() function
+def snmpwalk(host, var):
+	return snmpget(host, var, walk=True)
+
 #
 # returns real interface name (LLDP OIDs use only numbers while the device might use letters).
 #
 def get_port_name(host, port):
-	# Did we get an OID?
-	if '.' in port:
-		# Take the OID's second to last dot separated number. That's our interface.
-		logging.debug("get_port_name(): %s: From OID %s port is %s", host, port, port.split('.')[-2])
-		port = port.split('.')[-2]
 	# <port names OID><port number> is what we're looking for
-	ref = snmpget(host=host, var=if_oid['port_names'] + port)
+	ref = snmpget(host=host, var=if_oid['port_names'] + str(port))
 	if ref:
 		port = ref.val
 	logging.debug("get_port_name(): %s: Returning port name %s", host, port)
 	return port
+
+def get_parent_interface(host, port, subname):
+	parentname = subname.split('.')[0]
+	logging.debug("get_parent_interface(): Searching for interface name %s", parentname)
+	originalport = port
+	while True:
+		port = int(port) - 1
+		name = get_port_name(host, port)
+		if name == parentname:
+			logging.debug("get_parent_interface(): Found name %s on port number %s", name, port)
+			return port
+		if parentname not in name:
+			logging.debug("get_parent_interface(): Encountered name %s. Giving up.", name)
+			# Give up
+			return originalport
+		
 
 #
 # returns port speed
@@ -121,17 +138,12 @@ def get_port_speed(host, port, format='M'):
 	if format.upper() not in divide:
 		format='M'
 
-	# Did we get an OID?
-        if '.' in port:
-                # Take the OID's second to last dot separated number. That's our interface.
-                logging.debug("get_port_speed(): %s: From OID %s port is %s", host, port, port.split('.')[-2])
-                port = port.split('.')[-2]
         # <port speeds OID><port number> is what we're looking for
-        ref = snmpget(host=host, var=if_oid['port_speeds'] + port)
+        ref = snmpget(host=host, var=if_oid['port_speeds'] + str(port))
         if ref:
                 speed_in_bits = int(ref.val)
 		speed = speed_in_bits / divide[format.upper()]
-        logging.debug("get_port_name(): %s: Returning port name %s", host, port)
+        logging.debug("get_port_speed(): %s: Returning port speed %s", host, speed)
         return speed
 
 #		
@@ -164,6 +176,18 @@ def get_device_info(host):
 
 
 #
+# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
+#
+def get_neighbours(host):
+        # lldp VarList will be updated with values we got during the walk.
+        # We rather want to use the Varbind objects since we can read
+        # port number value from each OID.
+	lldp = snmpwalk(var=lldp_oid['remote_sysnames'], host=host)
+	if not lldp:
+		return None
+	return { x.tag: x.val for x in lldp if x.val }
+
+#
 # Returns list of dicts with port name, speed and neighbour.
 #
 def get_neighbour_port_info(host, neighbours=None):
@@ -174,25 +198,19 @@ def get_neighbour_port_info(host, neighbours=None):
 
 	for n in neighbours.keys():
 		# Take the OID's second to last dot separated number. That's our local interface.
-                port = get_port_name(host, n)
-		portspeed = get_port_speed(host, n)
-                logging.debug("get_neighbour_port_info(): %s port %s has neighbour %s, speed %s", host, port, neighbours[n], portspeed)
-		portlist.append({'name': port, 'speed': portspeed, 'neighbour': neighbours[n]})
+		portnumber = n.split('.')[-2]
+		logging.debug("get_neighbour_port_info(): %s: From OID %s port is %s", host, n, portnumber)
+                portname = get_port_name(host, portnumber)
+		if '.' in str(portname):
+			# Do we have a subinterface?
+			portspeed = get_port_speed(host, get_parent_interface(host, portnumber, portname))
+		else:
+			portspeed = get_port_speed(host, portnumber)
+
+                logging.debug("get_neighbour_port_info(): %s port %s has neighbour %s, speed %s", host, portname, neighbours[n], portspeed)
+		portlist.append({'name': portname, 'speed': portspeed, 'neighbour': neighbours[n]})
 
 	return portlist
-
-
-#
-# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
-#
-def get_neighbours(host):
-        # lldp VarList will be updated with values we got during the walk.
-        # We rather want to use the Varbind objects since we can read
-        # port number value from each OID.
-	lldp = snmpget(var=lldp_oid['remote_sysnames'], host=host, walk=True)
-	if not lldp:
-		return None
-	return { x.tag: x.val for x in lldp if x.val }
 
 
 #
@@ -204,8 +222,8 @@ def branch(host):
 
 	c = {}
 
-	# Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'.
-	host = host.split('.')[0]
+	if strip_domain_name:
+		host = host.split('.')[0]
 
 	# Sometimes LLDP neighbour reports no name at all
 	if not host:
@@ -245,10 +263,9 @@ def branch(host):
 def write_json_file(object, file=args.outfile):
 	with open(file, 'w') as outfile:
 		dump(object, outfile, sort_keys=False, indent=4, separators=(',', ': '))
-	
-
 
 t = branch(args.host)
+
 if args.outfile is not None:
 	write_json_file(t)
 else:
