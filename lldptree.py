@@ -14,10 +14,18 @@ from socket import gethostbyname, gaierror
 # Config
 # Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'. The hostname argument at command line also has to be without domain.
 strip_domain_name = True
+
 default_logfile='lldptree.log'
+
 default_outfile='lldptree.json'
+
+# For output to stdout:
+#default_outfile=None
+
 default_community='public'
+
 snmp_version=2
+
 # Uncomment to disable logging.
 #logging.disable(logging.INFO)
 
@@ -56,7 +64,7 @@ usage="%(prog)s [options] HOST"
 parser = ArgumentParser(usage=usage)
 parser.add_argument("host", help="hostname or IP address", metavar="HOST")
 parser.add_argument("-c", "--community", default=default_community, help="SNMP community (default: %s)" % default_community)
-parser.add_argument("-m", "--map", action="store_true", help="Generate recursive map of ID:s and child objects")
+parser.add_argument("-r", "-m", "--recurse", "--map", dest="recurse", action="store_true", help="Generate recursive map of ID:s and child objects")
 parser.add_argument("-i", "--info", action="store_true", help="Populate objects with extra device information where available")
 parser.add_argument("-p", "--ports", action="store_true", help="Populate objects with port:device mappings")
 parser.add_argument("-l", "--logfile", default=default_logfile, help="Log file (default: %s)" % default_logfile)
@@ -237,7 +245,7 @@ def branch(host):
 	if not neighbours:
 		return c
 
-	if args.map:
+	if args.recurse:
 		children = []
 		for x in neighbours.values():
 			# Have we already checked this device? Loop prevention.
