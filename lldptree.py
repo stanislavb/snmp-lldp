@@ -5,9 +5,8 @@
 # Compile net-snmp with python bindings
 
 import netsnmp
-import sys
 import logging
-from json import dumps, dump
+from json import dumps, load
 from argparse import ArgumentParser
 from socket import gethostbyname, gaierror
 
@@ -15,49 +14,9 @@ from socket import gethostbyname, gaierror
 # Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'. The hostname argument at command line also has to be without domain.
 strip_domain_name = True
 
-default_logfile='lldptree.log'
-
-default_outfile='lldptree.json'
-
-# For output to stdout:
-#default_outfile=None
-
 default_community='public'
 
 snmp_version=2
-
-# Uncomment to disable logging.
-#logging.disable(logging.INFO)
-
-standard_oid = dict(sysname='SNMPv2-MIB::sysName.0',
-		    sysdesc='SNMPv2-MIB::sysDescr.0',
-		    contact='SNMPv2-MIB::sysContact.0',
-		    location='SNMPv2-MIB::sysLocation.0',
-		    uptime='SNMPv2-MIB::sysUpTime.0')
-
-if_oid = dict(port_names='IF-MIB::ifName.',
-              port_speeds='IF-MIB::ifSpeed.',      # in bits/s
-              port_macs='IF-MIB::ifPhysAddress.')
-
-# LLDP OIDs: (Juniper devices with software older than JUNOS 11 lack 1.0.8802 OID)
-lldp_oid = dict(remote_sysnames='.1.0.8802.1.1.2.1.4.1.1.9.',
-		remote_sysdescs='.1.0.8802.1.1.2.1.4.1.1.10.',
-		remote_ports='.1.0.8802.1.1.2.1.4.1.1.7.',
-		remote_portdescs='.1.0.8802.1.1.2.1.4.1.1.8.')
-
-
-device_oid = dict()
-# Found among other on HP ProCurve devices, except I.10.* firmware
-device_oid['procurve'] = dict(rev='.1.0.8802.1.1.2.1.5.4795.1.2.2.0',
-			      bootfirmware='.1.0.8802.1.1.2.1.5.4795.1.2.3.0',
-			      firmware='.1.0.8802.1.1.2.1.5.4795.1.2.4.0',
-			      serial='.1.0.8802.1.1.2.1.5.4795.1.2.5.0',
-			      manufacturer='.1.0.8802.1.1.2.1.5.4795.1.2.6.0',
-			      model='.1.0.8802.1.1.2.1.5.4795.1.2.7.0')
-
-# Found among other on Juniper devices
-device_oid['juniper'] = dict(model='SNMPv2-SMI::enterprises.2636.3.1.2.0',
-			     serial='SNMPv2-SMI::enterprises.2636.3.1.3.0')
 
 # Command line option parsing and help text (-h)
 usage="%(prog)s [options] HOST"
@@ -66,32 +25,42 @@ parser.add_argument("host", help="hostname or IP address", metavar="HOST")
 parser.add_argument("-c", "--community", default=default_community, help="SNMP community (default: %s)" % default_community)
 parser.add_argument("-r", "-m", "--recurse", "--map", dest="recurse", action="store_true", help="Generate recursive map of ID:s and child objects")
 parser.add_argument("-i", "--info", action="store_true", help="Populate objects with extra device information where available")
-parser.add_argument("-p", "--ports", action="store_true", help="Populate objects with port:device mappings")
-parser.add_argument("-l", "--logfile", default=default_logfile, help="Log file (default: %s)" % default_logfile)
-parser.add_argument("-o", "--outfile", default=default_outfile, help="JSON output file (default: %s)" % default_outfile)
+parser.add_argument("-p", "--interfaces", action="store_true", help="Populate objects with interface:device mappings")
+parser.add_argument("-l", "--logfile", help="Log file (Default is logging to STDERR)")
+parser.add_argument("-o", "--oidfile", default='oid.json', help="JSON file containing SNMP OIDs (default: oid.json)")
 args = parser.parse_args()
 
 # List of devices we've already checked.
 checked = []
-logging.basicConfig(filename=args.logfile,level=logging.DEBUG)
+
+# Logging config
+logger = logging.getLogger(__name__)
+ch = logging.StreamHandler()
+ch.setLevel(logging.ERROR)
+logger.addHandler(ch)
+if args.logfile:
+	fh = logging.WatchedFileHandler(args.logfile)
+	fh.setLevel(logging.DEBUG)
+	logger.addHandler(fh)
+
+# Load OID data
+with open(args.oidfile) as outfile:
+	oid = load(outfile)
 
 
 #
 # returns netsnmp.Varbind object if successful, returns None if not.
 # returns netsnmp.VarList if walk is set to True
 #
-def snmpget(host, var, walk=False):
+def get(host, var, walk=False):
 	# Make sure host is resolvable
 	try:
 		gethostbyname(host)
 	except gaierror:
-		logging.debug("snmpget(): Couldn't resolve %s", host)
+		logger.error("get(): Couldn't resolve %s", host)
 		return None
 
-	# Make sure we have a Varbind
-	if not isinstance(var, netsnmp.Varbind):
-		logging.debug("snmpget(): %s Assuming OID %s", host, var)
-		var = netsnmp.Varbind(var)
+	var = netsnmp.Varbind(var)
 
 	if walk:
 		var = netsnmp.VarList(var)
@@ -101,57 +70,74 @@ def snmpget(host, var, walk=False):
 	else:
 		result = netsnmp.snmpget(var, DestHost=host, Version=snmp_version, Community=args.community, Retries=0)
 		if var.val:
-			logging.debug("snmpget(): %s Got value %s", host, var.val)
+			logger.debug("get(): %s Got value %s", host, var.val)
 			return var
 	return None
 
 
 # Shorthand for snmp walking using the snmpget() function
-def snmpwalk(host, var):
-	return snmpget(host, var, walk=True)
+def walk(host, var):
+	return get(host, var, walk=True)
 
 #
 # returns real interface name (LLDP OIDs use only numbers while the device might use letters).
 #
-def get_port_name(host, port):
-	# <port names OID><port number> is what we're looking for
-	ref = snmpget(host=host, var=if_oid['port_names'] + str(port))
+def get_interface_name(host, interface):
+	# <interface names OID><interface number> is what we're looking for
+	ref = get(host=host, var=oid['if']['interface_names'] + str(interface))
 	if ref:
-		port = ref.val
-	logging.debug("get_port_name(): %s: Returning port name %s", host, port)
-	return port
+		interface = ref.val
+	logger.debug("get_interface_name(): %s: Returning interface name %s", host, interface)
+	return interface
 
-def get_parent_interface(host, port, subname):
+#
+# returns interface description
+#
+def get_interface_desc(host, interface):
+	# <interface descriptions OID><interface number> is what we're looking for
+	ref = get(host=host, var=oid['if']['interface_descs'] + str(interface))
+	if ref:
+		desc = ref.val
+	logger.debug("get_interface_desc(): %s: Returning interface description %s", host, desc)
+	return desc
+#
+# returns interface ID
+#
+#def get_interface_by_name(host, interfacename):
+
+#
+# given subinterface name as input, finds and returns parent interface ID.
+#
+def get_parent_interface(host, interface, subname):
 	parentname = subname.split('.')[0]
-	logging.debug("get_parent_interface(): Searching for interface name %s", parentname)
-	originalport = port
+	logger.debug("get_parent_interface(): Searching for interface name %s", parentname)
+	originalinterface = interface
 	while True:
-		port = int(port) - 1
-		name = get_port_name(host, port)
+		interface = int(interface) - 1
+		name = get_interface_name(host, interface)
 		if name == parentname:
-			logging.debug("get_parent_interface(): Found name %s on port number %s", name, port)
-			return port
+			logger.debug("get_parent_interface(): Found name %s on interface number %s", name, interface)
+			return interface
 		if parentname not in name:
-			logging.debug("get_parent_interface(): Encountered name %s. Giving up.", name)
+			logger.debug("get_parent_interface(): Encountered name %s. Giving up.", name)
 			# Give up
-			return originalport
-		
+			return originalinterface
 
 #
-# returns port speed
+# returns interface speed
 #
-def get_port_speed(host, port, format='M'):
+def get_interface_speed(host, interface, format='M'):
 	speed = None
 	divide = { 'G': 1000000000, 'M': 1000000, 'K': 1000, 'B': 1 }
 	if format.upper() not in divide:
 		format='M'
 
-        # <port speeds OID><port number> is what we're looking for
-        ref = snmpget(host=host, var=if_oid['port_speeds'] + str(port))
+        # <interface speeds OID><interface number> is what we're looking for
+        ref = get(host=host, var=oid['if']['interface_speeds'] + str(interface))
         if ref:
                 speed_in_bits = int(ref.val)
 		speed = speed_in_bits / divide[format.upper()]
-        logging.debug("get_port_speed(): %s: Returning port speed %s", host, speed)
+        logger.debug("get_interface_speed(): %s: Returning interface speed %s", host, speed)
         return speed
 
 #		
@@ -163,22 +149,22 @@ def get_device_info(host):
 	device_family = None
 
 	# First we poll standard OIDs
-	for key in standard_oid:
-		ref = snmpget(host=host,var=standard_oid[key])
+	for key in oid['standard']:
+		ref = get(host=host,var=oid['standard'][key])
 		if ref:
-			logging.debug("get_device_info(): %s: %s is %s", host, key, ref.val)
+			logger.debug("get_device_info(): %s: %s is %s", host, key, ref.val)
 			r[key] = ref.val
 			if key is 'sysdesc':
 				# Split into words (space separated), take the first one and lowercase it
 				device_family = ref.val.split(' ')[0].lower()
-				logging.debug("get_device_info(): Found device family %s", device_family)
+				logger.debug("get_device_info(): Found device family %s", device_family)
 
 	# If we have a device family identified, let's look for a matching set of OIDs
-	if device_family in device_oid:
-		for key in device_oid[device_family]:
-			ref = snmpget(host=host, var=device_oid[device_family][key])
+	if device_family in oid['device']:
+		for key in oid['device'][device_family]:
+			ref = get(host=host, var=oid['device'][device_family][key])
 			if ref:
-				logging.debug("get_device_info(): %s: %s is %s", host, key, ref.val)
+				logger.debug("get_device_info(): %s: %s is %s", host, key, ref.val)
 				r[key] = ref.val	
 	return r
 
@@ -189,36 +175,36 @@ def get_device_info(host):
 def get_neighbours(host):
         # lldp VarList will be updated with values we got during the walk.
         # We rather want to use the Varbind objects since we can read
-        # port number value from each OID.
-	lldp = snmpwalk(var=lldp_oid['remote_sysnames'], host=host)
+        # interface number value from each OID.
+	lldp = walk(var=oid['lldp']['remote_sysnames'], host=host)
 	if not lldp:
 		return None
 	return { x.tag: x.val for x in lldp if x.val }
 
 #
-# Returns list of dicts with port name, speed and neighbour.
+# Returns list of dicts with interface name, speed and neighbour.
 #
-def get_neighbour_port_info(host, neighbours=None):
-	portlist = list()
+def get_neighbour_interface_info(host, neighbours=None):
+	interfacelist = list()
 	if not isinstance(neighbours, dict):
 		# neighbours is not a dict. Let's get us something to work with.
 		neighbours = get_neighbours(host)
 
 	for n in neighbours.keys():
 		# Take the OID's second to last dot separated number. That's our local interface.
-		portnumber = n.split('.')[-2]
-		logging.debug("get_neighbour_port_info(): %s: From OID %s port is %s", host, n, portnumber)
-                portname = get_port_name(host, portnumber)
-		if '.' in str(portname):
+		interfacenumber = n.split('.')[-2]
+		logger.debug("get_neighbour_interface_info(): %s: From OID %s interface is %s", host, n, interfacenumber)
+                interfacename = get_interface_name(host, interfacenumber)
+		if '.' in str(interfacename):
 			# Do we have a subinterface?
-			portspeed = get_port_speed(host, get_parent_interface(host, portnumber, portname))
+			interfacespeed = get_interface_speed(host, get_parent_interface(host, interfacenumber, interfacename))
 		else:
-			portspeed = get_port_speed(host, portnumber)
+			interfacespeed = get_interface_speed(host, interfacenumber)
 
-                logging.debug("get_neighbour_port_info(): %s port %s has neighbour %s, speed %s", host, portname, neighbours[n], portspeed)
-		portlist.append({'name': portname, 'speed': portspeed, 'neighbour': neighbours[n]})
+                logger.debug("get_neighbour_interface_info(): %s interface %s has neighbour %s, speed %s", host, interfacename, neighbours[n], interfacespeed)
+		interfacelist.append({'name': interfacename, 'speed': interfacespeed, 'neighbour': neighbours[n]})
 
-	return portlist
+	return interfacelist
 
 
 #
@@ -250,7 +236,7 @@ def branch(host):
 		for x in neighbours.values():
 			# Have we already checked this device? Loop prevention.
 			if x and (x not in checked):
-				logging.debug("branch(): %s has neighbour %s", host, x)
+				logger.debug("branch(): %s has neighbour %s", host, x)
 				checked.append(x)
 				# Recurse!
 				children.append(branch(x))
@@ -259,22 +245,13 @@ def branch(host):
 	else:
 		c['children'] = neighbours.values()
 
-	if args.ports:
-		c['ports'] = get_neighbour_port_info(host, neighbours)
+	if args.interfaces:
+		c['interfaces'] = get_neighbour_interface_info(host, neighbours)
 
 	return c
 
 
-#
-# Writes object to file in JSON format
-#
-def write_json_file(object, file=args.outfile):
-	with open(file, 'w') as outfile:
-		dump(object, outfile, sort_keys=False, indent=4, separators=(',', ': '))
+if __name__ == "__main__":
+	t = branch(args.host)
 
-t = branch(args.host)
-
-if args.outfile is not None:
-	write_json_file(t)
-else:
-	dumps(t, sort_keys=False, indent=4, separators=(',', ': '))
+	print(dumps(t, sort_keys=False, indent=4, separators=(',', ': ')))
