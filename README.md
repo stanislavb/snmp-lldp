@@ -32,14 +32,15 @@ optional arguments:
   -h, --help            show this help message and exit
   -c COMMUNITY, --community COMMUNITY
                         SNMP community (default: public)
-  -m, --map             Generate recursive map of ID:s and child objects
+  -r, -m, --recurse, --map
+                        Generate recursive map of ID:s and child objects
   -i, --info            Populate objects with extra device information where
                         available
-  -p, --ports           Populate objects with port:device mappings
+  -p, --interfaces      Populate objects with interface:device mappings
   -l LOGFILE, --logfile LOGFILE
-                        Log file (default: lldptree.log)
-  -o OUTFILE, --outfile OUTFILE
-                        JSON output file (default: lldptree.json)
+                        Log file (Default is logging to STDERR)
+  -o OIDFILE, --oidfile OIDFILE
+                        JSON file containing SNMP OIDs (default: oid.json)
 </pre>
 
 As result we get a log file with debug info and a json file generated with highly useful information. JSON object structure includes information gathered through SNMP: system name of the device, system description and for almost all HP ProCurve switches also model, firmware version, serial number and LLDP neighbours in a dict with local port as key (yay, recursion!).
@@ -136,9 +137,9 @@ $ cat lldptree.json
         "switch061.example.net",
         "switch030.example.net",
     ],
-    "location": "KI1102094",
+    "location": "Office",
     "model": "J4819A",
-    "serial": "SG78D34XLY ",
+    "serial": "SG00000001 ",
     "manufacturer": "Hewlett-Packard"
 }
 </pre>
@@ -146,7 +147,7 @@ $ cat lldptree.json
 The "-p" flag adds a list of ports under "ports" on each device record. Port information includes port speed and port name, including letters on modular HP devices and names like "ge-0/0/0" on Juniper devices. It also differs from the children list in that the port list can contain the same neighbour several times, for example in an LACP connection, and in a recursive lookup it also includes the parent device, which the list of children doesn't include to avoid loops.
 
 <pre>
-$ lldptree.py -p -c example-SNMP switch001
+$ lldptree.py -p -c public switch001
 $ cat lldptree.json 
 {
     "ports": [
