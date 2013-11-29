@@ -8,7 +8,7 @@ import netsnmp
 import logging
 from socket import gethostbyname, gaierror
 
-class HostnameError(Exception):
+class ResolveError(Exception):
 	def __init__(self, value):
 		self.value = value
 	def __str__(self):
@@ -22,30 +22,49 @@ class Connection:
 		try:
 			gethostbyname(host)
 		except gaierror:
-			raise HostnameError("Couldn't resolve hostname %s", host)
+			raise ResolveError("Couldn't resolve hostname %s" % host)
 
 		self.session = netsnmp.Session(DestHost=host, Version=version, Community=community, Retries=0)
 
-	#
-	# returns netsnmp.Varbind object if successful, returns None if not.
-	# returns netsnmp.VarList if walk is set to True
-	#
-	def get(self, var, walk=False):
-		var = netsnmp.Varbind(var)
-
-		if walk:
-			var = netsnmp.VarList(var)
-			result = self.session.snmpwalk(var)
-			if result:
-				return var
-		else:
-			result = self.session.snmpget(var)
-			if var.val:
-				logger.debug("get(): %s Got value %s", host, var.val)
-				return var
+	def get(self, var):
+		var = netsnmp.VarList(var)
+		result = self.session.get(var)
+		if var[0].val:
+			logger.debug("get(): %s Got value %s", host, var[0].val)
+			return var[0].val
 		return None
 	
-	# Shorthand for snmp walking using the snmpget() function
 	def walk(self, var):
-		return get(host, var, walk=True)
+		var = netsnmp.VarList(var)
+		result = self.session.walk(var)
+		if result:
+			return { x.tag: x.val for x in var if x.val }
+		return None
 
+	def walkget(self, var):
+		result = self.walk(var)
+		if not result:
+			result = self.get(var)
+		return result
+
+	def populatedict(self, indata):
+		outdata = dict.fromkeys(indata)
+		for key, oid in indata:
+			value = self.walkget(oid)
+			if not value:
+				# invalid OID - keep old value
+				outdata[key] = oid
+			else:
+				outdata[key] = value
+		return outdata
+
+	def populatelist(self, indata):
+		outdata = []
+		for oid in indata:
+			value = self.walkget(oid)
+			if not value:
+				# invalid OID - keep old value
+				outdata.append(oid)
+			else:
+				outdata.append(value)
+		return outdata
