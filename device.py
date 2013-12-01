@@ -4,6 +4,8 @@
 import snmp
 import logging
 
+logger = logging.getLogger(__name__)
+
 class Device:
 	__doc__ = "Networked device"
 
@@ -19,10 +21,10 @@ class Device:
 	#
 	def getInterfaceName(self, interface):
 		# <interface names OID><interface number> is what we're looking for
-		ref = self.snmp.get(oid['if']['interface_names'] + str(interface))
-		if ref:
-			interface = ref.val
-		logger.debug("%s: Returning interface name %s", host, interface)
+		name = self.snmp.get(oid['if']['interface_names'] + str(interface))
+		if name:
+			interface = name
+		logger.debug("Returning interface name %s", interface)
 		return interface
 
 	#
@@ -30,10 +32,8 @@ class Device:
 	#
 	def getInterfaceDesc(self, interface):
 		# <interface descriptions OID><interface number> is what we're looking for
-		ref = self.snmp.get(oid['if']['interface_descs'] + str(interface))
-		if ref:
-			desc = ref.val
-		logger.debug("%s: Returning interface description %s", host, desc)
+		desc = self.snmp.get(oid['if']['interface_descs'] + str(interface))
+		logger.debug("Returning interface description %s", desc)
 		return desc
 	#
 	# returns interface ID
@@ -43,13 +43,14 @@ class Device:
 	#
 	# given subinterface name as input, finds and returns parent interface ID.
 	#
-	def getParentInterface(host, interface, subname):
+	def getParentInterface(self, interface, subname):
 		parentname = subname.split('.')[0]
 		logger.debug("Searching for interface name %s", parentname)
+
 		originalinterface = interface
 		while True:
 		interface = int(interface) - 1
-			name = getInterfaceName(host, interface)
+			name = getInterfaceName(interface)
 			if name == parentname:
 				logger.debug("Found name %s on interface number %s", name, interface)
 				return interface
@@ -61,82 +62,72 @@ class Device:
 	#
 	# returns interface speed
 	#
-	def getInterfaceSpeed(host, interface, format='M'):
+	def getInterfaceSpeed(self, interface, format='M'):
 		speed = None
 		divide = { 'G': 1000000000, 'M': 1000000, 'K': 1000, 'B': 1 }
 		if format.upper() not in divide:
 			format='M'
 
 	        # <interface speeds OID><interface number> is what we're looking for
-        	ref = self.snmp.get(oid['if']['interface_speeds'] + str(interface))
-	        if ref:
-        	        speedInBits = int(ref.val)
+        	speed = self.snmp.get(oid['if']['interface_speeds'] + str(interface))
+	        if speed:
+        	        speedInBits = int(speed)
 			speed = speedInBits / divide[format.upper()]
-	        logger.debug("%s: Returning interface speed %s", host, speed)
+	        logger.debug("Returning interface speed %s", speed)
 	        return speed
 
 
-	def getDeviceInfo(host):
+	def getDeviceInfo(self):
 		# Let's start collecting info
 		r = {}
 		self.deviceFamily = None
 
 		# First we poll standard OIDs
-		for key in oid['standard']:
-			ref = self.snmp.get(oid['standard'][key])
-			if ref:
-				logger.debug("g%s: %s is %s", host, key, ref.val)
-				self.info[key] = ref.val
-				if key is 'sysdesc':
-					# Split into words (space separated), take the first one and lowercase it
-					self.deviceFamily = ref.val.split(' ')[0].lower()
-					logger.debug("Found device family %s", self.deviceFamily)
-
+		deviceinfo = self.snmp.populateDict(oid['standard'])
+		if 'sysdesc' in oidvalues:
+			# Split into words (space separated), take the first one and lowercase it
+			self.deviceFamily = deviceinfo['sysdesc'].split(' ')[0].lower()
+			logger.debug("Found device family %s", self.deviceFamily)
+		
 		# If we have a device family identified, let's look for a matching set of OIDs
 		if self.deviceFamily in oid['device']:
-			for key in oid['device'][self.deviceFamily]:
-				ref = self.snmp.get(oid['device'][self.deviceFamily][key])
-				if ref:
-					logger.debug("%s: %s is %s", host, key, ref.val)
-					r[key] = ref.val
-		self.info = r
-		return r
+			familyinfo = self.snmp.populateDict(oid['device'][self.deviceFamily]
+			deviceinfo = deviceinfo + familyinfo
+
+		self.info = deviceinfo
+		return deviceinfo
 
 
 	#
 	# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
 	#
-	def getNeighbours(host):
-	        # lldp VarList will be updated with values we got during the walk.
-	        # We rather want to use the Varbind objects since we can read
-	        # interface number value from each OID.
+	def getNeighbours(self):
 		lldp = self.snmp.walk(oid['lldp']['remote_sysnames'])
 		if not lldp:
 			return None
-		return { x.tag: x.val for x in lldp if x.val }
+		return lldp
 
 	#
 	# Returns list of dicts with interface name, speed and neighbour.
 	#
-	def getNeighbourInterfaceInfo(host, neighbours=None):
+	def getNeighbourInterfaceInfo(self, neighbours=None):
 		interfacelist = list()
 		if not isinstance(neighbours, dict):
 			# neighbours is not a dict. Let's get us something to work with.
-			neighbours = getNeighbours(host)
+			neighbours = getNeighbours()
 
 		for n in neighbours.keys():
 			# Take the OID's second to last dot separated number. That's our local interface.
 			interfacenumber = n.split('.')[-2]
-			logger.debug("%s: From OID %s interface is %s", host, n, interfacenumber)
-        	        interfacename = getInterfaceName(host, interfacenumber)
+			logger.debug("From OID %s interface is %s", n, interfacenumber)
+        	        interfacename = getInterfaceName(interfacenumber)
 			if '.' in str(interfacename):
 				# Do we have a subinterface?
-				interfacenumber = getParentInterface(host, interfacenumber, interfacename)
+				interfacenumber = getParentInterface(interfacenumber, interfacename)
 				
-			interfacespeed = getInterfaceSpeed(host, interfacenumber)
+			interfacespeed = getInterfaceSpeed(interfacenumber)
 
-        	        logger.debug("%s interface %s has neighbour %s, speed %s", host, interfacename, neighbours[n], interfacespeed)
+        	        logger.debug("%s interface %s has neighbour %s, speed %s", self.hostname, interfacename, neighbours[n], interfacespeed)
 			interfacelist.append({'name': interfacename, 'speed': interfacespeed, 'neighbour': neighbours[n]})
 
 		return interfacelist
-
