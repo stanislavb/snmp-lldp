@@ -57,14 +57,14 @@ class Connection:
 		logger.debug("SNMP walk on OID %s failed.", var)
 		return None
 
-	def walkget(self, var):
+	def walkGet(self, var):
 		result = self.walk(var)
 		if not result:
 			logger.debug("Walk failed. Trying get.")
 			result = self.get(var)
 		return result
 
-	def populatedict(self, indata):
+	def populateDict(self, indata):
 		outdata = dict.fromkeys(indata)
 		for key in indata:
 			oid = indata[key]
@@ -76,7 +76,7 @@ class Connection:
 				outdata[key] = value
 		return outdata
 
-	def populatelist(self, indata):
+	def populateList(self, indata):
 		outdata = []
 		for oid in indata:
 			value = self.walkget(oid)
