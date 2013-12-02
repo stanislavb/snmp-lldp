@@ -9,7 +9,6 @@ import logging
 from json import dumps, load
 from argparse import ArgumentParser
 from os import getenv
-
 import device
 
 # Config
@@ -28,9 +27,6 @@ parser = ArgumentParser(usage=usage)
 parser.add_argument("command", help="list or tree (default: list)", metavar="COMMAND")
 parser.add_argument("host", help="hostname or IP address", metavar="HOST")
 parser.add_argument("-c", "--community", default=defaultCommunity, help="SNMP community (default: %s)" % defaultCommunity)
-#parser.add_argument("-r", "-m", "--recurse", "--map", dest="recurse", action="store_true", help="Generate recursive map of ID:s and child objects")
-#parser.add_argument("-i", "--info", action="store_true", help="Populate objects with extra device information where available")
-#parser.add_argument("-p", "--interfaces", action="store_true", help="Populate objects with interface:device mappings")
 parser.add_argument("-q", "--quiet", action="store_true", help="Do not display or log errors")
 parser.add_argument("-l", "--logfile", default=defaultLogfile, help="Log file (Default is logging to STDERR)")
 parser.add_argument("-o", "--oidfile", default=defaultOidfile, help="JSON file containing SNMP OIDs (default: oid.json)")

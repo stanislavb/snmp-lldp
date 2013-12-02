@@ -119,26 +119,26 @@ class Device:
 		return lldp
 
 	#
-	# Returns list of dicts with interface name, speed and neighbour.
+	# Returns list of dicts with interface number, name, speed and neighbour.
 	#
 	def getNeighbourInterfaceInfo(self, neighbours=None):
-		interfacelist = list()
+		iflist = list()
 		if not isinstance(neighbours, dict):
 			# neighbours is not a dict. Let's get us something to work with.
 			neighbours = getNeighbours()
 
 		for n in neighbours.keys():
 			# Take the OID's second to last dot separated number. That's our local interface.
-			interfacenumber = n.split('.')[-2]
-			logger.debug("From OID %s interface is %s", n, interfacenumber)
-        	        interfacename = getInterfaceName(interfacenumber)
-			if '.' in str(interfacename):
+			ifnumber = n.split('.')[-2]
+			logger.debug("From OID %s interface is %s", n, ifnumber)
+        	        ifname = getInterfaceName(ifnumber)
+			if '.' in str(ifname):
 				# Do we have a subinterface?
-				interfacenumber = getParentInterface(interfacenumber, interfacename)
+				ifnumber = getParentInterface(ifnumber, ifname)
 				
-			interfacespeed = getInterfaceSpeed(interfacenumber)
+			ifspeed = getInterfaceSpeed(ifnumber)
 
-        	        logger.debug("%s interface %s has neighbour %s, speed %s", self.hostname, interfacename, neighbours[n], interfacespeed)
-			interfacelist.append({'name': interfacename, 'speed': interfacespeed, 'neighbour': neighbours[n]})
+        	        logger.debug("%s interface %s has neighbour %s, speed %s", self.hostname, ifname, neighbours[n], ifspeed)
+			interfacelist.append({'number': ifnumber, 'name': ifname, 'speed': ifspeed, 'neighbour': neighbours[n]})
 
 		return interfacelist
