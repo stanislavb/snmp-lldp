@@ -47,7 +47,7 @@ ch.setLevel(logging.ERROR)
 logger.addHandler(ch)
 # If file name provided for logging, write detailed log.
 if args.logfile:
-	fh = logging.WatchedFileHandler(args.logfile)
+	fh = logging.FileHandler(args.logfile)
 	fh.setLevel(logging.DEBUG)
 	logger.addHandler(fh)
 # If quiet mode, disable all logging.
@@ -60,12 +60,7 @@ if args.quiet:
 def gettree(host, trunk="id", branches="children"):
 	# List of devices we've already checked.
 	global checked
-	checked.append(host)
-	c = {}
-
-	# Sometimes LLDP neighbour reports no name at all
-	if not host:
-		return None
+	c = {trunk: host}
 
 	# Dirty fix, ought to be removed
 	if stripDomainName:
@@ -75,25 +70,23 @@ def gettree(host, trunk="id", branches="children"):
 		d = device.Device(host)
 		d.snmpConfig(oid, snmpVersion, args.community)
 	except snmp.ResolveError:
-		return None
-
-	c[trunk] = host
+		return c
 
 	neighbours = d.getNeighbours()
 	if not neighbours:
 		return c
 
 	children = []
+
+	# Have we already checked this device? Loop prevention.
 	for x in neighbours.values():
-		# Have we already checked this device? Loop prevention.
 		if x and (x not in checked):
 			logger.debug("%s has neighbour %s", host, x)
 			# Recurse!
+			checked.append(x)
 			children.append(gettree(x))
 	if children:
 		c[branches] = children
-	else:
-		c[branches] = neighbours.values()
 	return c
 
 if __name__ == "__main__":
@@ -101,6 +94,7 @@ if __name__ == "__main__":
 	with open(args.oidfile) as outfile:
 		oid = load(outfile)
 
+	checked.append(args.host)
 	t = gettree(args.host)
 
 	if "tree" not in args.command:
