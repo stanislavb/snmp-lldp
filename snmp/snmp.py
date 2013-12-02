@@ -68,7 +68,7 @@ class Connection:
 		outdata = dict.fromkeys(indata)
 		for key in indata:
 			oid = indata[key]
-			value = self.walkget(oid)
+			value = self.walkGet(oid)
 			if not value:
 				logger.debug("%s: OID %s is invalid, keeping it", key, oid)
 				outdata[key] = oid
@@ -79,7 +79,7 @@ class Connection:
 	def populateList(self, indata):
 		outdata = []
 		for oid in indata:
-			value = self.walkget(oid)
+			value = self.walkGet(oid)
 			if not value:
 				logger.debug("OID %s is invalid, keeping it", oid)
 				outdata.append(oid)

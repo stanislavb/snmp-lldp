@@ -9,10 +9,10 @@ logger = logging.getLogger(__name__)
 class Device:
 	__doc__ = "Networked device"
 
-	__init__(self, hostname):
+	def __init__(self, hostname):
 		self.hostname = hostname
 
-	snmpConfig(self, oid, version=2, community="public"):
+	def snmpConfig(self, oid, version=2, community="public"):
 		self.snmp = snmp.Connection(host=self.hostname, version=version, community=community)
 		self.oid = oid	
 
@@ -20,8 +20,10 @@ class Device:
 	# returns real interface name (LLDP OIDs use only numbers while the device might use letters).
 	#
 	def getInterfaceName(self, interface):
+		snmp = self.snmp
+		oid = self.oid
 		# <interface names OID><interface number> is what we're looking for
-		name = self.snmp.get(oid['if']['ifname'] + str(interface))
+		name = snmp.get(oid['if']['ifname'] + str(interface))
 		if name:
 			interface = name
 		logger.debug("Returning interface name %s", interface)
@@ -31,8 +33,10 @@ class Device:
 	# returns interface description
 	#
 	def getInterfaceDesc(self, interface):
+		snmp = self.snmp
+		oid = self.oid
 		# <interface descriptions OID><interface number> is what we're looking for
-		desc = self.snmp.get(oid['if']['ifdesc'] + str(interface))
+		desc = snmp.get(oid['if']['ifdesc'] + str(interface))
 		logger.debug("Returning interface description %s", desc)
 		return desc
 	#
@@ -49,7 +53,7 @@ class Device:
 
 		originalinterface = interface
 		while True:
-		interface = int(interface) - 1
+			interface = int(interface) - 1
 			name = getInterfaceName(interface)
 			if name == parentname:
 				logger.debug("Found name %s on interface number %s", name, interface)
@@ -63,13 +67,15 @@ class Device:
 	# returns interface speed
 	#
 	def getInterfaceSpeed(self, interface, format='M'):
+		snmp = self.snmp
+		oid = self.oid
 		speed = None
 		divide = { 'G': 1000000000, 'M': 1000000, 'K': 1000, 'B': 1 }
 		if format.upper() not in divide:
 			format='M'
 
 	        # <interface speeds OID><interface number> is what we're looking for
-        	speed = self.snmp.get(oid['if']['ifspeed'] + str(interface))
+        	speed = snmp.get(oid['if']['ifspeed'] + str(interface))
 	        if speed:
         	        speedInBits = int(speed)
 			speed = speedInBits / divide[format.upper()]
@@ -78,22 +84,26 @@ class Device:
 
 
 	def getDeviceInfo(self):
+		snmp = self.snmp
+		oid = self.oid
 		# Let's start collecting info
 		r = {}
-		self.deviceFamily = None
+		deviceFamily = None
 
 		# First we poll standard OIDs
-		deviceinfo = self.snmp.populateDict(oid['standard'])
-		if 'sysdesc' in oidvalues:
+		deviceinfo = snmp.populateDict(oid['standard'])
+		if 'sysdesc' in deviceinfo:
 			# Split into words (space separated), take the first one and lowercase it
-			self.deviceFamily = deviceinfo['sysdesc'].split(' ')[0].lower()
-			logger.debug("Found device family %s", self.deviceFamily)
+			deviceFamily = deviceinfo['sysdesc'].split(' ')[0].lower()
+			logger.debug("Found device family %s", deviceFamily)
 		
 		# If we have a device family identified, let's look for a matching set of OIDs
-		if self.deviceFamily in oid['device']:
-			familyinfo = self.snmp.populateDict(oid['device'][self.deviceFamily]
-			deviceinfo = deviceinfo + familyinfo
+		if deviceFamily in oid['device']:
+			familyinfo = snmp.populateDict(oid['device'][deviceFamily])
+			# Add the information to the deviceinfo dict
+			deviceinfo.update(familyinfo)
 
+		self.deviceFamily = deviceFamily
 		self.info = deviceinfo
 		return deviceinfo
 
@@ -102,6 +112,7 @@ class Device:
 	# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
 	#
 	def getNeighbours(self):
+		oid = self.oid
 		lldp = self.snmp.walk(oid['lldp']['remotesysname'])
 		if not lldp:
 			return None
