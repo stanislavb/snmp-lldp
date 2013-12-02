@@ -21,7 +21,7 @@ class Device:
 	#
 	def getInterfaceName(self, interface):
 		# <interface names OID><interface number> is what we're looking for
-		name = self.snmp.get(oid['if']['interface_names'] + str(interface))
+		name = self.snmp.get(oid['if']['ifname'] + str(interface))
 		if name:
 			interface = name
 		logger.debug("Returning interface name %s", interface)
@@ -32,7 +32,7 @@ class Device:
 	#
 	def getInterfaceDesc(self, interface):
 		# <interface descriptions OID><interface number> is what we're looking for
-		desc = self.snmp.get(oid['if']['interface_descs'] + str(interface))
+		desc = self.snmp.get(oid['if']['ifdesc'] + str(interface))
 		logger.debug("Returning interface description %s", desc)
 		return desc
 	#
@@ -69,7 +69,7 @@ class Device:
 			format='M'
 
 	        # <interface speeds OID><interface number> is what we're looking for
-        	speed = self.snmp.get(oid['if']['interface_speeds'] + str(interface))
+        	speed = self.snmp.get(oid['if']['ifspeed'] + str(interface))
 	        if speed:
         	        speedInBits = int(speed)
 			speed = speedInBits / divide[format.upper()]
@@ -102,7 +102,7 @@ class Device:
 	# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
 	#
 	def getNeighbours(self):
-		lldp = self.snmp.walk(oid['lldp']['remote_sysnames'])
+		lldp = self.snmp.walk(oid['lldp']['remotesysname'])
 		if not lldp:
 			return None
 		return lldp
