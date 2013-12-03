@@ -20,6 +20,7 @@ snmpVersion=2
 
 # Command line option parsing and help text (-h)
 parser = ArgumentParser()
+parser.add_argument("-f", "--inputfile", help="File to read list of devices from (defaults to reading from stdin)")
 parser.add_argument("-c", "--community", default=defaultCommunity, help="SNMP community (default: %s)" % defaultCommunity)
 parser.add_argument("-q", "--quiet", action="store_true", help="Do not display or log errors")
 parser.add_argument("-l", "--logfile", default=defaultLogfile, help="Log file (Default is logging to STDERR)")
@@ -62,18 +63,31 @@ def getinfo(hostname):
 if __name__ == "__main__":
 	inputlist = []
 	devicelist = []
+	inputtext = None
 
 	# Load OID data
-	with open(args.oidfile) as outfile:
-		oid = json.load(outfile)
+	with open(args.oidfile) as oidlist:
+		oid = json.load(oidlist)
 
-	inputtext =  "".join(sys.stdin)
+	if args.inputfile:
+		try:
+			with open(args.inputfile) as f:
+				inputtext = f.read()
+		except IOError:
+			logger.error("Could not read from file %s" % inputfile)
+
+	if not inputtext:
+		if sys.stdin.isatty():
+			logger.debug("Detected TTY at STDIN")
+			print "Reading list of devices from STDIN. Press ^D when done, or ^C to quit."
+		inputtext =  "".join(sys.stdin)
+
 	logger.info(inputtext)
 	try:
 		inputlist = json.loads(inputtext)
 	except ValueError:
 		logger.error("No valid JSON detected in input")
-		inputlist = inputtext
+		inputlist = inputtext.split()
 
 	for hostname in inputlist:
 		devicelist.append(getinfo(hostname))

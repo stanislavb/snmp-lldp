@@ -87,8 +87,8 @@ def gettree(host, trunk="id", branches="children"):
 
 if __name__ == "__main__":
 	# Load OID data
-	with open(args.oidfile) as outfile:
-		oid = load(outfile)
+	with open(args.oidfile) as oidlist:
+		oid = load(oidlist)
 
 	checked.append(args.host)
 	t = gettree(args.host)
