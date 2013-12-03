@@ -1,12 +1,11 @@
 #!/usr/bin/env python
 # Author: Stanislav Blokhin
 
-import snmp
 import logging
-from json import dumps, load, loads
+import sys
+import json
 from argparse import ArgumentParser
 from os import getenv
-import fileinput
 import device
 
 # Config
@@ -28,7 +27,8 @@ parser.add_argument("-o", "--oidfile", default=defaultOidfile, help="JSON file c
 args = parser.parse_args()
 
 # Logging config
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 # By default, log to stderr.
 ch = logging.StreamHandler()
 ch.setLevel(logging.ERROR)
@@ -43,30 +43,39 @@ if args.quiet:
 	logger.disabled = True
 
 def getinfo(hostname):
-	c = {"hostname": hostname}
+	c = {"sysname": hostname}
 
 	# Dirty fix, ought to be removed
 	if stripDomainName:
-		host = host.split('.')[0]
+		hostname = hostname.split('.')[0]
 
+	d = device.Device(hostname)
 	try:
-		d = device.Device(host)
-		d.snmpConfig(oid, snmpVersion, args.community)
-	except snmp.ResolveError:
-		return c
-	c.update(d.getDeviceInfo())
+		reachable = d.snmpConfig(oid, snmpVersion, args.community, test=True)
+	except:
+		reachable = False
+
+	if reachable:
+		c.update(d.getDeviceInfo())
 	return c
 
 if __name__ == "__main__":
+	inputlist = []
+	devicelist = []
+
 	# Load OID data
 	with open(args.oidfile) as outfile:
-		oid = load(outfile)
+		oid = json.load(outfile)
 
-	for line in lineinput.input():
-		inputtext+=str(line)
-	inputlist = loads(inputtext)
+	inputtext =  "".join(sys.stdin)
+	logger.info(inputtext)
+	try:
+		inputlist = json.loads(inputtext)
+	except ValueError:
+		logger.error("No valid JSON detected in input")
+		inputlist = inputtext
 
 	for hostname in inputlist:
-		t.append(getinfo(hostname))
+		devicelist.append(getinfo(hostname))
 
-	print(dumps(t, sort_keys=False, indent=4, separators=(',', ': ')))
+	print(json.dumps(devicelist, sort_keys=False, indent=4, separators=(',', ': ')))

@@ -5,16 +5,26 @@ import snmp
 import logging
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class Device:
 	__doc__ = "Networked device"
+	info = {}
 
 	def __init__(self, hostname):
 		self.hostname = hostname
 
-	def snmpConfig(self, oid, version=2, community="public"):
+	def snmpConfig(self, oid, version=2, community="public", test=False):
 		self.snmp = snmp.Connection(host=self.hostname, version=version, community=community)
-		self.oid = oid	
+		self.oid = oid
+		if test:
+			return self.snmpTest()
+
+	def snmpTest(self, oid = ".1.3.6.1.2.1.1.5.0"):
+		result = self.snmp.get(oid)
+		if not result:
+			logger.warning("Cannot get OID %s on host %s" % oid,self.hostname)
+		return result
 
 	#
 	# returns real interface name (LLDP OIDs use only numbers while the device might use letters).
@@ -26,7 +36,7 @@ class Device:
 		name = snmp.get(oid['if']['ifname'] + str(interface))
 		if name:
 			interface = name
-		logger.debug("Returning interface name %s", interface)
+		logger.info("Returning interface name %s", interface)
 		return interface
 
 	#
@@ -37,7 +47,7 @@ class Device:
 		oid = self.oid
 		# <interface descriptions OID><interface number> is what we're looking for
 		desc = snmp.get(oid['if']['ifdesc'] + str(interface))
-		logger.debug("Returning interface description %s", desc)
+		logger.info("Returning interface description %s", desc)
 		return desc
 	#
 	# returns interface ID
@@ -79,7 +89,7 @@ class Device:
 	        if speed:
         	        speedInBits = int(speed)
 			speed = speedInBits / divide[format.upper()]
-	        logger.debug("Returning interface speed %s", speed)
+	        logger.info("Returning interface speed %s", speed)
 	        return speed
 
 
@@ -95,7 +105,7 @@ class Device:
 		if 'sysdesc' in deviceinfo:
 			# Split into words (space separated), take the first one and lowercase it
 			deviceFamily = deviceinfo['sysdesc'].split(' ')[0].lower()
-			logger.debug("Found device family %s", deviceFamily)
+			logger.info("Found device family %s", deviceFamily)
 		
 		# If we have a device family identified, let's look for a matching set of OIDs
 		if deviceFamily in oid['device']:
@@ -104,7 +114,7 @@ class Device:
 			deviceinfo.update(familyinfo)
 
 		self.deviceFamily = deviceFamily
-		self.info = deviceinfo
+		self.info.update(deviceinfo)
 		return deviceinfo
 
 
@@ -138,7 +148,7 @@ class Device:
 				
 			ifspeed = getInterfaceSpeed(ifnumber)
 
-        	        logger.debug("%s interface %s has neighbour %s, speed %s", self.hostname, ifname, neighbours[n], ifspeed)
+        	        logger.info("%s interface %s has neighbour %s, speed %s", self.hostname, ifname, neighbours[n], ifspeed)
 			interfacelist.append({'number': ifnumber, 'name': ifname, 'speed': ifspeed, 'neighbour': neighbours[n]})
 
 		return interfacelist

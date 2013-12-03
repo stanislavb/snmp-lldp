@@ -4,7 +4,6 @@
 # FreeBSD requirements:
 # Compile net-snmp with python bindings
 
-import snmp
 import logging
 from json import dumps, load
 from argparse import ArgumentParser
@@ -36,7 +35,8 @@ args = parser.parse_args()
 checked = []
 
 # Logging config
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 # By default, log to stderr.
 ch = logging.StreamHandler()
 ch.setLevel(logging.ERROR)
@@ -65,7 +65,7 @@ def gettree(host, trunk="id", branches="children"):
 	try:
 		d = device.Device(host)
 		d.snmpConfig(oid, snmpVersion, args.community)
-	except snmp.ResolveError:
+	except:
 		return c
 
 	neighbours = d.getNeighbours()
