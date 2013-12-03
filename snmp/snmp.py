@@ -68,7 +68,7 @@ class Connection:
 		return result
 
 	def populateDict(self, indata, keepValuesOnFailure=False):
-		outdata = dict.fromkeys(indata)
+		outdata = {}
 		for key in indata:
 			oid = indata[key]
 			value = self.walkGet(oid)
