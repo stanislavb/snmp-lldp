@@ -8,7 +8,8 @@ Prerequisites
 * Net-SNMP with python bindings
 * Be able to resolve device IP from name reported through LLDP
 * Same SNMP community configured on all devices
-(a dirty hack exists in the code to convert FQDN like ’switch.example.com’ to just ’switch’)
+
+**A dirty hack exists in the code to convert FQDN like ’switch.example.com’ to just ’switch’. Look for stripDomainName = True in lldp.py and getinfo.py**
 
 Limitations
 -----------
@@ -19,72 +20,77 @@ Limitations
 * SNMP version 1 and 2 only
 * If a device is connected to another with several ports, only the first port gets registered in the tree.
 
-Usage
------
-Run the script with hostname of a SNMP and LLDP enabled device as argument. That device will become root of the generated tree.
+Future features
+---------------
+* Network interface information
+* VLAN information
+
+lldp.py usage
+-------------
+Run the script with hostname of a SNMP and LLDP enabled device as argument. That device will become root of the generated lldp tree structure.
 <pre>
-usage: lldptree.py [options] HOST
+usage: lldp.py [options] COMMAND HOST
 
 positional arguments:
+  COMMAND               list or tree (default: list)
   HOST                  hostname or IP address
 
 optional arguments:
   -h, --help            show this help message and exit
   -c COMMUNITY, --community COMMUNITY
                         SNMP community (default: public)
-  -r, -m, --recurse, --map
-                        Generate recursive map of ID:s and child objects
-  -i, --info            Populate objects with extra device information where
-                        available
-  -p, --interfaces      Populate objects with interface:device mappings
+  -q, --quiet           Do not display or log errors
   -l LOGFILE, --logfile LOGFILE
                         Log file (Default is logging to STDERR)
   -o OIDFILE, --oidfile OIDFILE
                         JSON file containing SNMP OIDs (default: oid.json)
+
 </pre>
 
-As result we get a log file with debug info and a json file generated with highly useful information. JSON object structure includes information gathered through SNMP: system name of the device, system description and for almost all HP ProCurve switches also model, firmware version, serial number and LLDP neighbours in a dict with local port as key (yay, recursion!).
-
-Output examples
----------------
-
-Output always includes an "id" field and a list of "children" which are directly connected devices reported in the LLDP table. The "-m" flag does a recursive lookup.
+If COMMAND is list, the JSON output to STDOUT is a list of hostnames detected recursively through LLDP.
 <pre>
-$ lldptree.py -m -c public switch001
-$ cat lldptree.json
+[
+	"switch001.example.net",
+	"switch008.example.net",
+	"switch036.example.net",
+	# output truncated
+]
+</pre>
 
+If COMMAND is tree, output is JSON tree structure in following format:
+<pre>
 {
-    "id": "switch001",
+    "id": "switch001.example.net",
     "children": [
         {
-            "id": "switch008",
+            "id": "switch008.example.net",
             "children": [
                 {
-                    "id": "switch036"
+                    "id": "switch036.example.net"
                 },
                 {
-                    "id": "switch005"
+                    "id": "switch005.example.net"
                 },
                 {
-                    "id": "switch001",
+                    "id": "switch001.example.net",
                     "children": [
                         {
-                            "id": "switch028"
+                            "id": "switch028.example.net"
                         },
                         {
-                            "id": "switch019"
+                            "id": "switch019.example.net"
                         },
                         {
-                            "id": "switch014"
+                            "id": "switch014.example.net"
                         },
                         {
-                            "id": "switch032"
+                            "id": "switch032.example.net"
                         },
                         {
-                            "id": "switch045",
+                            "id": "switch045.example.net",
                             "children": [
                                 {
-                                    "id": "switch056"
+                                    "id": "switch056.example.net"
                                 }
                             ]
                         }
@@ -97,119 +103,48 @@ $ cat lldptree.json
 }
 </pre>
 
-The "-i" flag adds some interesting info fields about the device. Different information is available from HP and Juniper devices.
+getinfo.py usage
+----------------
 
+getinfo.py is designed to be run with lldp.py list output as input, either through stdin (pipe, for example) or by specifying a text file with the '-f' flag. Something like this:
 <pre>
-$ lldptree.py -i -c public switch001
-$ cat lldptree.json 
-
-{
-    "sysname": "switch001.example.net",
-    "uptime": "1297101183",
-    "firmware": "E.11.03",
-    "bootfirmware": "E.05.05",
-    "sysdesc": "ProCurve J4819A Switch 5308xl, revision E.11.03, ROM E.05.05 (/sw/code/build/alpmo(alp11))",
-    "rev": "Rev 0",
-    "id": "switch001",
-    "children": [
-        "switch008.example.net",
-        "switch028.example.net",
-        "switch019.example.net",
-        "switch014.example.net",
-        "switch032.example.net",
-        "switch045.example.net"
-        "switch034.example.net",
-        "switch013.example.net",
-        "switch033.example.net",
-        "switch025.example.net",
-        "switch043.example.net",
-        "switch029.example.net",
-        "switch052.example.net",
-        "switch001.example.net",
-        "switch002.example.net",
-        "switch026.example.net",
-        "switch010.example.net",
-        "switch060.example.net",
-        "switch024.example.net",
-        "switch011.example.net"
-        "switch049.example.net",
-        "switch001.example.net",
-        "switch061.example.net",
-        "switch030.example.net",
-    ],
-    "location": "Office",
-    "model": "J4819A",
-    "serial": "SG00000001 ",
-    "manufacturer": "Hewlett-Packard"
-}
+export SNMPCOMMUNITY=secretcommunity
+lldp.py list switch001.example.net | getinfo.py > deviceinfo.json
+-or-
+lldp.py list switch001.example.net > list.json
+getinfo.py -f list.json
+-or-
+lldp.py list switch001.example.net > list.json
+cat list.json | getinfo.py
 </pre>
 
-The "-p" flag adds a list of ports under "ports" on each device record. Port information includes port speed and port name, including letters on modular HP devices and names like "ge-0/0/0" on Juniper devices. It also differs from the children list in that the port list can contain the same neighbour several times, for example in an LACP connection, and in a recursive lookup it also includes the parent device, which the list of children doesn't include to avoid loops.
-
+Other flags:
 <pre>
-$ lldptree.py -p -c public switch001
-$ cat lldptree.json 
-{
-    "ports": [
-        {
-            "neighbour": "switch008.example.net",
-            "speed": 100,
-            "name": "G9"
-        },
-        {
-            "neighbour": "switch028.example.net",
-            "speed": 1000,
-            "name": "A2"
-        },
-        {
-            "neighbour": "switch019.example.net",
-            "speed": 100,
-            "name": "C21"
-        },
-        {
-            "neighbour": "switch014.example.net",
-            "speed": 100,
-            "name": "C3"
-        },
-        {
-            "neighbour": "switch032.example.net",
-            "speed": 1000,
-            "name": "E1"
-        },
-        {
-            "neighbour": "switch045.example.net",
-            "speed": 100,
-            "name": "H11"
-        }
-	# output truncated
-    ],
-    "id": "switch001",
-    "children": [
-        "switch008.example.net",
-        "switch028.example.net",
-        "switch019.example.net",
-        "switch014.example.net",
-        "switch032.example.net",
-        "switch045.example.net"
-        "switch034.example.net",
-        "switch013.example.net",
-        "switch033.example.net",
-        "switch025.example.net",
-        "switch043.example.net",
-        "switch029.example.net",
-        "switch052.example.net",
-        "switch001.example.net",
-        "switch002.example.net",
-        "switch026.example.net",
-        "switch010.example.net",
-        "switch060.example.net",
-        "switch024.example.net",
-        "switch011.example.net"
-        "switch049.example.net",
-        "switch001.example.net",
-        "switch061.example.net",
-        "switch030.example.net"
-    ]
+usage: getinfo.py [-h] [-f INPUTFILE] [-c COMMUNITY] [-q] [-l LOGFILE]
+                  [-o OIDFILE]
 
-}
+optional arguments:
+  -h, --help            show this help message and exit
+  -f INPUTFILE, --inputfile INPUTFILE
+                        File to read list of devices from (defaults to reading
+                        from stdin)
+  -c COMMUNITY, --community COMMUNITY
+                        SNMP community (default: public)
+  -q, --quiet           Do not display or log errors
+  -l LOGFILE, --logfile LOGFILE
+                        Log file (Default is logging to STDERR)
+  -o OIDFILE, --oidfile OIDFILE
+                        JSON file containing SNMP OIDs (default: oid.json)
 </pre>
+
+License
+-------
+Copyright 2013 Stanislav Blokhin (github.com/stanislavb)
+
+This file is part of snmp-lldp.
+
+snmp-lldp is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+snmp-lldp is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with snmp-lldp.  If not, see <http://www.gnu.org/licenses/>.
