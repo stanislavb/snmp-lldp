@@ -36,6 +36,7 @@ class ResolveError(Exception):
 class Connection:
 	__doc__ = "SNMP connection to a single host, containing common data like authentication"
 
+	# Configuring SNMP session towards a single host.
 	def __init__(self, host, version=2, community='public'):
 		logger.debug("Creating snmp.Connection instance for host %s" % host)
 		# Make sure host is resolvable
@@ -47,6 +48,7 @@ class Connection:
 
 		self.session = netsnmp.Session(DestHost=host, Version=version, Community=community, Retries=0)
 
+	# SNMP get on a single OID. Returns value or None.
 	def get(self, var):
 		try:
 			varlist = netsnmp.VarList(var)
@@ -61,7 +63,8 @@ class Connection:
 
 		logger.debug("SNMP get on OID %s failed.", var)
 		return None
-	
+
+	# SNMP walk on an OID. Returns dict of {OID: value} pairs or None.
 	def walk(self, var):
 		try:
 			varlist = netsnmp.VarList(var)
@@ -76,6 +79,32 @@ class Connection:
 		logger.debug("SNMP walk on OID %s failed.", var)
 		return None
 
+	# Optimization attempt. Assemble a VarList of desired OIDs, run a single session,
+	# then reassemble values into dict to return.
+	def dictGet(self, indict):
+		outdict = {}
+		varlist = netsnmp.VarList()
+		for key in indict:
+			oid = indict[key]
+			try:
+				varbind = netsnmp.Varbind(oid)
+			except TypeError:
+				break
+			# Using a key here that netsnmp library is unlikely to implement in the future.
+			varbind.snmp_dict_key = key
+			varlist.varbinds.append(varbind)
+
+		# Magic happens
+		self.session.get(varlist)
+
+		for varbind in varlist:
+			if varbind.val:
+				outdict[varbind.snmp_dict_key] = varbind.val
+		return outdict
+
+	# Try walking the OID, then getting it.
+	# Why walk first? Walk will succeed on more variations of misspelled OIDs,
+	# Either with missing bits of hierarchy or a forgotten trailing dot.
 	def walkGet(self, var):
 		result = self.walk(var)
 		if not result:
@@ -83,6 +112,7 @@ class Connection:
 			result = self.get(var)
 		return result
 
+	# Takes dict of OIDs as input, returns dict with values.
 	def populateDict(self, indata, keepValuesOnFailure=False):
 		outdata = {}
 		for key in indata:
@@ -95,6 +125,8 @@ class Connection:
 				outdata[key] = oid
 		return outdata
 
+	# Takes list of OIDs as input, returns list of values.
+	# When is this even useful?
 	def populateList(self, indata, keepValuesOnFailure=False):
 		outdata = []
 		for oid in indata:

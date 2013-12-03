@@ -43,19 +43,12 @@ dmixed = {"sysDescr": ".1.3.6.1.2.1.1.1.0",
 "sysORLastChange": "test",
 "nonetest": ""}
 
+# Legit input
 r = c.get(".1.3.6.1.2.1.1.1.0")
 print r
 print not r
 
 r = c.walk(".1.3.6.1.2.1.1.1")
-print r
-print not r
-
-r = c.get("1.1")
-print r
-print not r
-
-r = c.walk("1.1")
 print r
 print not r
 
@@ -67,10 +60,6 @@ r = c.populateList(l)
 print r
 print not r
 
-r = c.populateDict(dmixed)
-print r
-print not r
-
-r = c.populateList(lmixed)
+r = c.dictGet(d)
 print r
 print not r
