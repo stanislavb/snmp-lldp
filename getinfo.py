@@ -22,7 +22,11 @@ import sys
 import json
 from argparse import ArgumentParser
 from os import getenv
+from time import clock
 import device
+
+# Benchmarking performance
+startTime = clock()
 
 # Config
 # Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'. The hostname argument at command line also has to be without domain.
@@ -105,7 +109,10 @@ if __name__ == "__main__":
 		logger.error("No valid JSON detected in input")
 		inputlist = inputtext.split()
 
+	mainLoopStartTime = clock()
 	for hostname in inputlist:
 		devicelist.append(getinfo(hostname))
+	logger.info("Time spent in main loop: %s" % (clock() - mainLoopStartTime))
 
 	print(json.dumps(devicelist, sort_keys=False, indent=4, separators=(',', ': ')))
+	logger.info("Time spent in program: %s" % (clock() - startTime))
