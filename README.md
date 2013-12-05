@@ -9,8 +9,6 @@ Prerequisites
 * Be able to resolve device IP from name reported through LLDP
 * Same SNMP community configured on all devices
 
-**A dirty hack exists in the code to convert FQDN like ’switch.example.com’ to just ’switch’. Look for stripDomainName = True in lldp.py and getinfo.py**
-
 Limitations
 -----------
 * **Currently this script only handles LLDP for HP ProCurve and Juniper JUNOS devices**

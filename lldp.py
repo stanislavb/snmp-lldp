@@ -26,10 +26,6 @@ from argparse import ArgumentParser
 from os import getenv
 import device
 
-# Config
-# Dirty fix for not resolving FQDN properly. This converts 'host.domain.com' into just 'host'. The hostname argument at command line also has to be without domain.
-stripDomainName = True
-
 # Fallback values
 defaultCommunity = getenv('SNMPCOMMUNITY', 'public')
 defaultLogfile = getenv('LOGFILE', None)
@@ -73,10 +69,6 @@ def gettree(host, trunk="id", branches="children"):
 	# List of devices we've already checked.
 	global checked
 	c = {trunk: host}
-
-	# Dirty fix, ought to be removed
-	if stripDomainName:
-		host = host.split('.')[0]
 
 	try:
 		d = device.Device(host)
