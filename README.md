@@ -135,6 +135,41 @@ optional arguments:
                         JSON file containing SNMP OIDs (default: oid.json)
 </pre>
 
+graph.py usage
+--------------
+
+Prerequisites:
+* pydot library
+
+graph.py is designed to be run with getinfo.py output as input, either through stdin (pipe, for example) or by specifying a text file with the '-f' flag. A device has to be specified to put in the root of the graph. Something like this:
+<pre>
+export SNMPCOMMUNITY=secretcommunity
+lldp.py list switch001.example.net | getinfo.py > deviceinfo.json
+cat deviceinfo.json | graph.py -o graph.png switch001.example.net
+</pre>
+
+Other flags:
+<pre>
+usage: graph.py [-h] [-i INFOFILE] [-o OUTFILE] [-l LOGFILE] [-q] [-v] ROOT
+
+positional arguments:
+  ROOT                  Device to put as root of the graph
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -i INFOFILE, --infofile INFOFILE
+                        File to read info about devices from (default:
+                        info.json, failing that: stdin)
+  -o OUTFILE, --outfile OUTFILE
+                        File to write to (default: graph.png)
+  -l LOGFILE, --logfile LOGFILE
+                        Log file (default is logging to STDERR)
+  -q, --quiet           Do not display or log errors
+  -v, --verbose         Increase verbosity when using logfile.
+</pre>
+
+
+
 License
 -------
 Copyright 2013 Stanislav Blokhin (github.com/stanislavb)

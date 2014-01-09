@@ -65,6 +65,7 @@ class Device:
 		desc = snmp.get(oid['if']['ifdesc'] + str(interface))
 		logger.info("Returning interface description %s", desc)
 		return desc
+
 	#
 	# returns interface ID
 	#
@@ -80,7 +81,7 @@ class Device:
 		originalinterface = interface
 		while True:
 			interface = int(interface) - 1
-			name = getInterfaceName(interface)
+			name = self.getInterfaceName(interface)
 			if name == parentname:
 				logger.debug("Found name %s on interface number %s", name, interface)
 				return interface
@@ -108,6 +109,44 @@ class Device:
 	        logger.info("Returning interface speed %s", speed)
 	        return speed
 
+	#
+	# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
+	#
+	def getNeighbours(self):
+		oid = self.oid
+		lldp = self.snmp.walk(oid['lldp']['remotesysname'])
+		if not lldp:
+			return None
+		logger.debug(lldp)
+		return lldp
+
+	#
+	# Returns list of dicts with interface number, name, speed and neighbour.
+	#
+	def getNeighbourInterfaceInfo(self, neighbours=None):
+		iflist = []
+		if not isinstance(neighbours, dict):
+			# neighbours is not a dict. Let's get us something to work with.
+			neighbours = self.getNeighbours()
+
+		if not neighbours:
+			return None
+
+		for n in neighbours.keys():
+			# Take the OID's second to last dot separated number. That's our local interface.
+			ifnumber = n.split('.')[-2]
+			logger.debug("From OID %s interface is %s", n, ifnumber)
+        	        ifname = self.getInterfaceName(ifnumber)
+			if '.' in str(ifname):
+				# Do we have a subinterface?
+				ifnumber = self.getParentInterface(ifnumber, ifname)
+				
+			ifspeed = self.getInterfaceSpeed(ifnumber)
+
+        	        logger.info("%s interface %s has neighbour %s, speed %s", self.hostname, ifname, neighbours[n], ifspeed)
+			iflist.append({'number': ifnumber, 'name': ifname, 'speed': ifspeed, 'neighbour': neighbours[n]})
+
+		return iflist
 
 	def getDeviceInfo(self):
 		snmp = self.snmp
@@ -130,41 +169,6 @@ class Device:
 			deviceinfo.update(familyinfo)
 
 		self.deviceFamily = deviceFamily
+		deviceinfo['if'] = self.getNeighbourInterfaceInfo()
 		self.info.update(deviceinfo)
 		return deviceinfo
-
-
-	#
-	# Collects LLDP neighbours from SMTP information, returns dict of oid:neighbour pairs.
-	#
-	def getNeighbours(self):
-		oid = self.oid
-		lldp = self.snmp.walk(oid['lldp']['remotesysname'])
-		if not lldp:
-			return None
-		return lldp
-
-	#
-	# Returns list of dicts with interface number, name, speed and neighbour.
-	#
-	def getNeighbourInterfaceInfo(self, neighbours=None):
-		iflist = list()
-		if not isinstance(neighbours, dict):
-			# neighbours is not a dict. Let's get us something to work with.
-			neighbours = getNeighbours()
-
-		for n in neighbours.keys():
-			# Take the OID's second to last dot separated number. That's our local interface.
-			ifnumber = n.split('.')[-2]
-			logger.debug("From OID %s interface is %s", n, ifnumber)
-        	        ifname = getInterfaceName(ifnumber)
-			if '.' in str(ifname):
-				# Do we have a subinterface?
-				ifnumber = getParentInterface(ifnumber, ifname)
-				
-			ifspeed = getInterfaceSpeed(ifnumber)
-
-        	        logger.info("%s interface %s has neighbour %s, speed %s", self.hostname, ifname, neighbours[n], ifspeed)
-			interfacelist.append({'number': ifnumber, 'name': ifname, 'speed': ifspeed, 'neighbour': neighbours[n]})
-
-		return interfacelist

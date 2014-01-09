@@ -50,7 +50,7 @@ class InfoWorker(threading.Thread):
 				reachable = False
 			if reachable:
 				c.update(d.getDeviceInfo())
-			self.outputQueue.put(c)
+			self.outputQueue.put({job['hostname']: c})
 			self.jobQueue.task_done()
 
 if __name__ == "__main__":
@@ -98,7 +98,7 @@ if __name__ == "__main__":
 
 	# Main logic
 	inputlist = []
-	devicelist = []
+	devices =  {}
 	inputtext = None
 	jobQ = Queue.Queue()
 	resultQ = Queue.Queue()
@@ -116,8 +116,8 @@ if __name__ == "__main__":
 
 	if not inputtext:
 		if sys.stdin.isatty():
-			logger.debug("Detected TTY at STDIN")
-			print "Reading list of devices from STDIN. Press ^D when done, or ^C to quit."
+			logger.debug("Detected TTY at STDIN.")
+			logger.error("Reading list of devices from STDIN. Press ^D when done, or ^C to quit.")
 		inputtext =  "".join(sys.stdin)
 
 	logger.info(inputtext)
@@ -145,11 +145,11 @@ if __name__ == "__main__":
 	# Build a list out of output queue
 	try:
 		while True:
-			devicelist.append(resultQ.get_nowait())
+			devices.update(resultQ.get_nowait())
 	except Queue.Empty:
 		pass
 
 	logger.info("Time spent in main loop: %s" % (time() - mainLoopStartTime))
 
-	print(json.dumps(devicelist, sort_keys=False, indent=4, separators=(',', ': ')))
+	print(json.dumps(devices, sort_keys=False, indent=4, separators=(',', ': ')))
 	logger.info("Time spent in program: %s" % (time() - startTime))

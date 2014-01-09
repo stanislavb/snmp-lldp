@@ -1,1 +1,1 @@
-__all__ = ['device', 'lldp', 'getinfo']
+__all__ = ['device', 'lldp', 'getinfo', 'graph']
