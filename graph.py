@@ -32,8 +32,7 @@ logger.setLevel(logging.DEBUG)
 
 # Globals
 checked = []
-graph = pydot.Dot(graph_type='graph')
-
+graph = pydot.Dot(graph_type='graph', ranksep='1')
 # Parse json input from file, return object(s) or None
 def get_object_from_file(filename):
 	inputtext = None
@@ -95,7 +94,9 @@ def build_graph(devicelist, root):
 			logger.info("Device %s has neighbour %s" % (device.get('sysname'), interface.get('neighbour')))
 			if interface.get('neighbour') not in checked:
 				logger.info("Adding relationship to graph")
-				edge = pydot.Edge(device.get('sysname'), interface.get('neighbour'))
+				edge = pydot.Edge(device.get('sysname'), interface.get('neighbour'), minlen='1.5')
+				if interface.get('speed', 10) > 100:
+					edge.set_style('bold')										
 				graph.add_edge(edge)
 				build_graph(devicelist, interface.get('neighbour'))
 
