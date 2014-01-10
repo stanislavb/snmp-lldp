@@ -42,7 +42,8 @@ def get_object_from_file(filename):
 		with open(filename) as f:
 			inputtext = f.read()
 	except IOError:
-		logger.error("Could not read from file %s" % inputfile)
+		logger.error("Could not read from file %s" % filename)
+		return None
 	# Try to parse text as json
 	try:
 		j = json.loads(inputtext)
@@ -60,6 +61,7 @@ def get_object_from_stdin():
 		inputtext =  "".join(sys.stdin)
 	else:
 		logger.debug("Detected TTY at STDIN")
+		return None
 	# Try to parse text as json
 	try:
 		j = json.loads(inputtext)
