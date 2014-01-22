@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <link href='https://fonts.googleapis.com/css?family=Architects+Daughter' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/pygment_trac.css" media="screen" />
+    <link rel="stylesheet" type="text/css" href="stylesheets/print.css" media="print" />
+
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+
+    <title>SNMP-LLDP by stanislavb</title>
+  </head>
+
+  <body>
+    <header>
+      <div class="inner">
+        <h1>SNMP-LLDP</h1>
+        <h2>Build LLDP tree from SNMP information</h2>
+        <a href="https://github.com/stanislavb/snmp-lldp" class="button"><small>View project on</small>GitHub</a>
+      </div>
+    </header>
+
+    <div id="content-wrapper">
+      <div class="inner clearfix">
+        <section id="main-content">
+          <h1>
+<a name="snmp-lldp" class="anchor" href="#snmp-lldp"><span class="octicon octicon-link"></span></a>SNMP LLDP</h1>
+
+<p>Build LLDP tree from SNMP information</p>
+
+<h2>
+<a name="prerequisites" class="anchor" href="#prerequisites"><span class="octicon octicon-link"></span></a>Prerequisites</h2>
+
+<ul>
+<li>Net-SNMP with python bindings</li>
+<li>Be able to resolve device IP from name reported through LLDP</li>
+<li>Same SNMP community configured on all devices</li>
+</ul><h2>
+<a name="limitations" class="anchor" href="#limitations"><span class="octicon octicon-link"></span></a>Limitations</h2>
+
+<ul>
+<li><strong>Currently this script only handles LLDP for HP ProCurve and Juniper JUNOS devices</strong></li>
+<li>HP ProCurve firmware I.10.43 and perhaps the whole I-series seems to lack OIDs for model, firmware version, serial number.</li>
+<li>Juniper JUNOS older than version 11 seems to lack LLDP OIDs</li>
+<li>Script can only reach devices which report a resolvable hostname over LLDP and have the same SNMP community configured.</li>
+<li>SNMP version 1 and 2 only</li>
+<li>If a device is connected to another with several ports, only the first port gets registered in the tree.</li>
+</ul><h2>
+<a name="future-features" class="anchor" href="#future-features"><span class="octicon octicon-link"></span></a>Future features</h2>
+
+<ul>
+<li>Network interface information</li>
+<li>VLAN information</li>
+</ul><h2>
+<a name="lldppy-usage" class="anchor" href="#lldppy-usage"><span class="octicon octicon-link"></span></a>lldp.py usage</h2>
+
+<p>Run the script with hostname of a SNMP and LLDP enabled device as argument. That device will become root of the generated lldp tree structure.</p>
+
+<pre>
+usage: lldp.py [options] COMMAND HOST
+
+positional arguments:
+  COMMAND               list or tree (default: list)
+  HOST                  hostname or IP address
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -c COMMUNITY, --community COMMUNITY
+                        SNMP community (default: public)
+  -q, --quiet           Do not display or log errors
+  -l LOGFILE, --logfile LOGFILE
+                        Log file (Default is logging to STDERR)
+  -o OIDFILE, --oidfile OIDFILE
+                        JSON file containing SNMP OIDs (default: oid.json)
+
+</pre>
+
+<p>If COMMAND is list, the JSON output to STDOUT is a list of hostnames detected recursively through LLDP.</p>
+
+<pre>
+[
+    "switch001.example.net",
+    "switch008.example.net",
+    "switch036.example.net",
+    # output truncated
+]
+</pre>
+
+<p>If COMMAND is tree, output is JSON tree structure in following format:</p>
+
+<pre>
+{
+    "id": "switch001.example.net",
+    "children": [
+        {
+            "id": "switch008.example.net",
+            "children": [
+                {
+                    "id": "switch036.example.net"
+                },
+                {
+                    "id": "switch005.example.net"
+                },
+                {
+                    "id": "switch001.example.net",
+                    "children": [
+                        {
+                            "id": "switch028.example.net"
+                        },
+                        {
+                            "id": "switch019.example.net"
+                        },
+                        {
+                            "id": "switch014.example.net"
+                        },
+                        {
+                            "id": "switch032.example.net"
+                        },
+                        {
+                            "id": "switch045.example.net",
+                            "children": [
+                                {
+                                    "id": "switch056.example.net"
+                                }
+                            ]
+                        }
+            # output truncated
+                    ]
+                }
+            ]
+        }
+    ]
+}
+</pre>
+
+<h2>
+<a name="getinfopy-usage" class="anchor" href="#getinfopy-usage"><span class="octicon octicon-link"></span></a>getinfo.py usage</h2>
+
+<p>getinfo.py is designed to be run with lldp.py list output as input, either through stdin (pipe, for example) or by specifying a text file with the '-f' flag. Something like this:</p>
+
+<pre>
+export SNMPCOMMUNITY=secretcommunity
+lldp.py list switch001.example.net | getinfo.py &gt; deviceinfo.json
+-or-
+lldp.py list switch001.example.net &gt; list.json
+getinfo.py -f list.json
+-or-
+lldp.py list switch001.example.net &gt; list.json
+cat list.json | getinfo.py
+</pre>
+
+<p>Other flags:</p>
+
+<pre>
+usage: getinfo.py [-h] [-f INPUTFILE] [-c COMMUNITY] [-q] [-l LOGFILE]
+                  [-o OIDFILE]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -f INPUTFILE, --inputfile INPUTFILE
+                        File to read list of devices from (defaults to reading
+                        from stdin)
+  -c COMMUNITY, --community COMMUNITY
+                        SNMP community (default: public)
+  -q, --quiet           Do not display or log errors
+  -l LOGFILE, --logfile LOGFILE
+                        Log file (Default is logging to STDERR)
+  -o OIDFILE, --oidfile OIDFILE
+                        JSON file containing SNMP OIDs (default: oid.json)
+</pre>
+
+<h2>
+<a name="graphpy-usage" class="anchor" href="#graphpy-usage"><span class="octicon octicon-link"></span></a>graph.py usage</h2>
+
+<p>Prerequisites:</p>
+
+<ul>
+<li>pydot library</li>
+</ul><p>graph.py is designed to be run with getinfo.py output as input, either through stdin (pipe, for example) or by specifying a text file with the '-f' flag. A device has to be specified to put in the root of the graph. Something like this:</p>
+
+<pre>
+export SNMPCOMMUNITY=secretcommunity
+lldp.py list switch001.example.net | getinfo.py &gt; deviceinfo.json
+cat deviceinfo.json | graph.py -o graph.png switch001.example.net
+</pre>
+
+<p>Other flags:</p>
+
+<pre>
+usage: graph.py [-h] [-i INFOFILE] [-o OUTFILE] [-l LOGFILE] [-q] [-v] ROOT
+
+positional arguments:
+  ROOT                  Device to put as root of the graph
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -i INFOFILE, --infofile INFOFILE
+                        File to read info about devices from (default:
+                        info.json, failing that: stdin)
+  -o OUTFILE, --outfile OUTFILE
+                        File to write to (default: graph.png)
+  -l LOGFILE, --logfile LOGFILE
+                        Log file (default is logging to STDERR)
+  -q, --quiet           Do not display or log errors
+  -v, --verbose         Increase verbosity when using logfile.
+</pre>
+
+<h2>
+<a name="license" class="anchor" href="#license"><span class="octicon octicon-link"></span></a>License</h2>
+
+<p>Copyright 2013 Stanislav Blokhin (github.com/stanislavb)</p>
+
+<p>This file is part of snmp-lldp.</p>
+
+<p>snmp-lldp is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.</p>
+
+<p>snmp-lldp is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.</p>
+
+<p>You should have received a copy of the GNU General Public License along with snmp-lldp.  If not, see <a href="http://www.gnu.org/licenses/">http://www.gnu.org/licenses/</a>.</p>
+        </section>
+
+        <aside id="sidebar">
+          <a href="https://github.com/stanislavb/snmp-lldp/zipball/master" class="button">
+            <small>Download</small>
+            .zip file
+          </a>
+          <a href="https://github.com/stanislavb/snmp-lldp/tarball/master" class="button">
+            <small>Download</small>
+            .tar.gz file
+          </a>
+
+          <p class="repo-owner"><a href="https://github.com/stanislavb/snmp-lldp"></a> is maintained by <a href="https://github.com/stanislavb">stanislavb</a>.</p>
+
+          <p>This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the Architect theme by <a href="https://twitter.com/jasonlong">Jason Long</a>.</p>
+        </aside>
+      </div>
+    </div>
+
+            <script type="text/javascript">
+            var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+            document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+          </script>
+          <script type="text/javascript">
+            try {
+              var pageTracker = _gat._getTracker("UA-1296558-2");
+            pageTracker._trackPageview();
+            } catch(err) {}
+          </script>
+
+  </body>
+</html>
